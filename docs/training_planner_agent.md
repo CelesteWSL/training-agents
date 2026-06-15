@@ -649,7 +649,6 @@ GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才
 
 
 ##### RecoveryConstraint（恢复约束）
-##### RecoveryConstraint（恢复约束）
 
 | 规则 | 阈值 | severity |
 |------|------|----------|
