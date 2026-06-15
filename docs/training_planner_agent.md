@@ -660,24 +660,36 @@ GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才
 
 ##### RecoveryConstraint（恢复约束）
 
-| 规则 | 阈值 | severity |
-|------|------|----------|
-| 连续 Hard 天数 | ≤ `max_consecutive_hard`（默认 1） | critical |
+| 规则 | 阈值 | severity | repair_hint |
+|------|------|----------|-------------|
+| 连续 Hard 天数 | ≤ `max_consecutive_hard`（默认 1） | critical | `downgrade_session` |
+| 3 日滚动负荷 | ≤ `rolling_3day_load_max`（默认 6） | warning | `downgrade_session` |
 
 ```python
+LOAD_SCORE = {"rest": 0, "easy": 1, "moderate": 2, "hard": 3}
+
 RECOVERY_POLICY = {
-    "min_gap_days": 1,
     "max_consecutive_hard": 1,
+    "rolling_3day_load_max": 6,
 }
 ```
 
 `is_hard(session)` 统一使用 `session.intensity` 判定——不依赖 `session_type`。
 
-- `intensity == "hard"` → Hard Session
-- `intensity == "moderate"` → Moderate Session
-- `intensity == "easy"` / `"rest"` → Low Session
+- `intensity == "hard"` → LOAD_SCORE 3
+- `intensity == "moderate"` → LOAD_SCORE 2
+- `intensity == "easy"` → LOAD_SCORE 1
+- `intensity == "rest"` → LOAD_SCORE 0
 
-Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 设为 `"moderate"` 或 `"hard"`，统一走 `session.intensity` 判断。
+Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 按实际判定。
+
+**rolling_3day_load 规则**：任意连续 3 天的 LOAD_SCORE 总和超过阈值即违例。解决 `hard → moderate → hard` 模式漏检问题（moderate 本身有训练负荷，隔在中间不代表充分恢复）。
+
+- `hard(3) + rest(0) + hard(3) = 6` → 通过
+- `hard(3) + easy(1) + hard(3) = 7` → **违例**
+- `hard(3) + moderate(2) + hard(3) = 8` → **违例**
+
+两项阈值均可由 SRA 动态调节。例如 `cns_fatigue` 时 `max_consecutive_hard = 0`、`rolling_3day_load_max = 4`。
 
 违例输出：
 
@@ -685,11 +697,20 @@ Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 设为 `"moderate"` 
 {
   "rule": "consecutive_hard_days",
   "actual": 2,
-  "limit": 1
+  "limit": 1,
+  "repair_hint": "downgrade_session"
 }
 ```
 
-`max_consecutive_hard` 可由 SRA 动态调节。例如 `cns_fatigue` 时可设为 0，直接生效。
+```json
+{
+  "rule": "rolling_3day_load",
+  "actual": 8,
+  "limit": 6,
+  "repair_hint": "downgrade_session"
+}
+```
+
 
 ##### VolumeConstraint（负荷约束）
 
