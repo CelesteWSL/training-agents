@@ -526,9 +526,9 @@ Sun   Long Run 24km     ← 保留但减量 20%（Goal Prioritizer）
 
 ```
 Constraint Checker
-├── RecoveryConstraint
-├── VolumeConstraint
-└── IntensityConstraint
+├── RecoveryConstraint    # priority 3（最高）
+├── VolumeConstraint      # priority 2
+└── IntensityConstraint   # priority 1
 ```
 
 每个子约束实现统一的 BaseConstraint 接口：
@@ -538,11 +538,9 @@ class BaseConstraint:
     def check(self, plan, context) -> ConstraintResult:
         """只发现问题，不修改计划。"""
         ...
+class RecoveryConstraint(BaseConstraint):   ...
 class VolumeConstraint(BaseConstraint):     ...
 class IntensityConstraint(BaseConstraint):  ...
-class VolumeConstraint(BaseConstraint):     ...
-class IntensityConstraint(BaseConstraint):  ...
-```
 
 子约束返回 ConstraintResult：
 
@@ -601,19 +599,31 @@ class IntensityConstraint(BaseConstraint):  ...
         "intensity": intensity_constraint.check(plan, context),
     }
     return ConstraintCheckerResult(
-        passed=all(r.passed for r in details.values()),
-        violations=[v for r in details.values() for v in r.violations],
-        details=details,
+    violations = sorted(
+        [v for r in details.values() for v in r.violations],
+        key=lambda v: (SEVERITY_ORDER[v.severity], CONSTRAINT_PRIORITY[v.constraint]),
+        reverse=True,
     )
-```
 
 - `passed`：所有子约束都通过才为 true
 - `violations`：合并所有子约束的违规列表（保留 `details` 便于 Debug）
+- `violations`：合并所有子约束的违规列表，按 (severity, constraint_priority) 降序排列
 - `details`：分组保留各子约束结果，后续 Report Generator 和 Repair Engine 均可复用
 
-位于 Policy Generator 与 Plan Modifier 之间。职责是根据用户目标给 WeeklyBlock 的 Sessions 标注 GoalPriority——告诉后续 Plan Modifier 和 Repair Engine 哪些课优先保留，哪些可先降级。
+```python
+SEVERITY_ORDER = {"critical": 3, "warning": 2, "info": 1}
 
-这不是 Constraint（不校验 pass/fail），而是 Planning Policy——Long Run 被删掉不一定是错（疲劳 critical 时就应该删）。
+CONSTRAINT_PRIORITY = {
+    "recovery": 3,
+    "volume": 2,
+    "intensity": 1,
+}
+```
+
+Recovery 优先级最高（恢复永远第一），Intensity 最低。Repair Engine 按此顺序逐条修复，高优违规先处理。
+
+**子约束优先级与排序：**
+
 
 **输入：** Policy + current_plan + user_goal
 
