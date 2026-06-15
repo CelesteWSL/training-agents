@@ -1,7 +1,4 @@
 ﻿## Training Table Generator
-Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么办"——两者配合构成完整的训练教练系统。
-
-## Training Table Generator
 
 Training Table Generator 是训练计划系统的初始生成层，负责在用户初始化时生成完整的周期化训练表。它输出 TrainingTable，供 Training Planner Agent 后续动态调整。
 
@@ -375,19 +372,23 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
 class TrainingPlannerAgent:
     def adjust(self, input: PlannerInput) -> PlannerOutput:
         policy    = PolicyGenerator.generate(input.action, input.modifiers, input.user_goal)
-        policy    = PolicyGenerator.generate(input.action, input.modifiers, input.user_goal)
         plan      = GoalPrioritizer.assign(policy, input.current_plan, input.user_goal)
         draft     = PlanModifier.modify(policy, plan, input.analysis_context)
         check     = ConstraintChecker.check_all(draft, input.analysis_context)
-            check = ConstraintChecker.check_all(draft, input.analysis_context)
-        changes   = diff(input.current_plan, draft)
+        repair    = RepairEngine.repair(draft, check.violations, input.analysis_context, user_goal=input.user_goal)
+        changes   = diff(input.current_plan, repair.plan)
         debts     = DebtManager.register(changes)
-        return PlannerOutput(draft, changes, check, debts)
+        return PlannerOutput(repair.plan, changes, repair, debts)
 ```
 
-流水线：**Policy Generator → Plan Modifier → Constraint Checker → Repair Engine → Final Plan**
 流水线：**Policy Generator → Goal Prioritizer → Plan Modifier → Constraint Checker → Repair Engine → Final Plan**
-注意：Constraint 的职责是验收（Validation），不是指导修改（Modification）。Repair Engine 才是修复的执行者。
+
+职责分工：
+- Policy Generator：生成训练调整策略
+- Goal Prioritizer：标注 GoalPriority Session
+- Plan Modifier：按策略修改课表（执行层）
+- Constraint Checker：校验修改结果是否合规（验收层）
+- Repair Engine：修复违规，以最小代价使计划合规（优化层）
 
 ---
 
@@ -808,39 +809,312 @@ INTENSITY_POLICY = {
 
 #### 5. Repair Engine（修复引擎）
 
-接收 Constraint Checker 的违规列表，按 severity 排序后逐条修复。
+职责：
 
-**输入：**
+> 根据 Constraint Checker 的违规结果，以最小代价（Minimal Change）修复训练计划，同时最大程度保留 GoalPriority Session。
 
-```json
-draft_plan + violations
-```
+位于 Constraint Checker 之后，作为优化层。是整个 Planning System 的核心壁垒——前面的模块都在"看懂"和"修改"，只有 Repair Engine 在"优化"。
 
-**输出：**
+**核心设计原则：**
 
-```json
-{
-    "repaired": true,
-    "attempts": 2,
-    "changes": [
-        {"session": "w03_thu_tempo", "from": "tempo", "to": "easy_run", "reason": "Hard 间隔不足"}
-    ]
-}
-```
+> **Repair Engine 永远追求 Minimal Change（最小改动原则），而不是把违规计划修成一个全新的计划。**
 
-修复优先级：
-1. critical → 立即修复
-2. warning → 按序修复
-3. info → 记录但不强制修复
-
-修复策略：
-- Hard 间隔不足 → 将相邻 Hard session 降级为 Easy
-- Long Run 占比过高 → 缩减 Long Run 距离
-- 周跑量增幅过大 → 等比例缩减 Easy run 距离
-- 强度分布不达标 → 降级部分 Moderate/High session
+这是专业训练软件（TrainingPeaks、Final Surge、Runna 等）的核心思想——用户昨天刚安排好的课表，今天 AI 一修整个星期都变了，体验会很差。
 
 ---
 
+##### 内部结构
+
+```
+Repair Engine
+├── Violation Resolver   → 排序违规，决定先修什么
+├── Action Generator     → 生成候选修复动作
+├── Plan Applier         → 执行修复
+└── Validation Loop      → 重新校验并迭代
+```
+
+##### 输入
+
+```json
+draft_plan + violations + analysis_context + user_goal
+```
+
+##### 输出
+
+```json
+{
+  "repaired": true,
+  "attempts": 2,
+  "final_score": 95,
+  "remaining_violations": [],
+  "changes": [
+    {
+      "action": "move_session",
+      "session_id": "w03_thu_tempo",
+      "from": "thu",
+      "to": "fri",
+      "reason": "Hard gap violation",
+      "cost": 1
+    },
+    {
+      "action": "reduce_distance",
+      "session_id": "w03_sun_long_run",
+      "from": 20,
+      "to": 18,
+      "reason": "Long run ratio",
+      "cost": 1
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `repaired` | `bool` | 是否完成修复（可能仍有 remaining_violations） |
+| `attempts` | `int` | 实际修复迭代次数 |
+| `final_score` | `int` | 修复后的 Constraint Checker 健康度评分（0-100） |
+| `remaining_violations` | `list` | 修复后仍存在的违规（为空才说明完全修复） |
+| `changes` | `List[RepairChange]` | 每次修复的详细记录，含 action / cost |
+
+---
+
+##### Violation Resolver（违规排序器）
+
+负责决定先修什么，后修什么。
+
+输入 violations，按以下优先级排序（从高到低）：
+
+```text
+severity（critical > warning > info）
+    ↓
+constraint_priority（recovery > volume > intensity）
+    ↓
+goal_priority（GoalPriority session 的违规降序处理，尽量不碰）
+```
+
+例如：
+
+```text
+critical recovery 违规 → 最先修
+warning volume 违规   → 其次
+warning intensity 违规 → 最后
+```
+
+其中 GoalPriority session 的违规在同等 severity 下排到最后——这保证了 Repair Engine 优先修改非关键的 session。
+
+```python
+SEVERITY_ORDER = {"critical": 3, "warning": 2, "info": 1}
+
+CONSTRAINT_PRIORITY = {
+    "recovery": 3,
+    "volume": 2,
+    "intensity": 1,
+}
+```
+
+---
+
+##### Action Generator（动作生成器）
+
+根据 violation 生成候选修复动作。核心思想：**同一违规有多种修法，按 cost 择优——这是专业度的来源。**
+
+**统一接口：**
+
+```python
+class BaseRepairAction:
+    def apply(self, plan, violation, context) -> int:
+        """执行修复，返回 cost。失败返回 -1。"""
+        ...
+```
+
+**5 种具体修复动作：**
+
+| Action | Cost | 含义 |
+|--------|------|------|
+| `MoveSessionAction` | 1 | 将 session 移到邻近空闲日 |
+| `ReduceDistanceAction` | 1 | 缩减距离 |
+| `DowngradeSessionAction` | 2 | 降级强度（hard→moderate, moderate→easy, easy→rest） |
+| `InsertRestAction` | 3 | 在两个 session 之间插入 rest day |
+| `RemoveSessionAction` | 5 | 删除非核心 session |
+
+**REPAIR_REGISTRY（违规类型 → 候选修复动作映射）：**
+
+```python
+REPAIR_REGISTRY = {
+    "consecutive_hard_days": [
+        MoveSessionAction(),
+        DowngradeSessionAction(),
+        InsertRestAction(),
+        RemoveSessionAction(),
+    ],
+    "rolling_3day_load": [
+        DowngradeSessionAction(),
+        MoveSessionAction(),
+    ],
+    "long_run_ratio": [
+        ReduceDistanceAction(),
+    ],
+    "weekly_volume_growth": [
+        ReduceDistanceAction(target="easy_runs"),
+    ],
+    "intensity_ratio": [
+        DowngradeSessionAction(),
+    ],
+}
+```
+
+列表按 cost 升序排列。Action Generator 按序尝试，取第一个成功的（cost 最低的）。
+
+**设计示例——连续 Hard 违规的多种修法：**
+
+原计划：
+
+```
+Mon easy  |  Tue intervals  |  Wed tempo  |  Thu easy  |  Fri long_run
+```
+
+违规：Tue intervals + Wed tempo 连续 Hard。
+
+| 方案 | 动作 | 结果 | Cost |
+|------|------|------|------|
+| **方案1（推荐）** | MoveSession | Wed tempo → Thu, Thu easy → Fri | 1 |
+| 方案2 | DowngradeSession | Wed tempo → easy | 2 |
+| 方案3 | InsertRest | Wed 插入 rest，后续顺延 | 3 |
+
+Action Generator 自动选择方案1。
+
+---
+
+##### Goal Priority Penalty（目标优先级惩罚）
+
+GoalPriority session 由 user_goal 自动识别：
+
+```python
+GOAL_SESSION_MAP = {
+    "marathon":        "long_run",
+    "half_marathon":   "marathon_pace",
+    "10km":            "intervals",
+    "5km":             "intervals",
+}
+```
+
+修改 GoalPriority session 时，cost 增加 penalty：
+
+```python
+GOAL_PENALTY = 100
+```
+
+例如：
+- 删除一个普通 easy run → cost = 5
+- 删除 long_run（marathon 目标）→ cost = 5 + 100 = 105
+
+基本不会发生。仅在 `critical` severity 且 `full_rest` 场景下允许触碰 GoalPriority session。
+
+---
+
+##### Plan Applier（计划应用器）
+
+对 Action Generator 选出的最优动作，修改对应的 `DailySession`：
+
+| 动作 | 修改内容 |
+|------|----------|
+| MoveSessionAction | 改 `date` / `day_of_week` / `session_id`，后续 session 日期顺延 |
+| DowngradeSessionAction | 改 `session_type` / `intensity` / `hr_zone` / `description` |
+| ReduceDistanceAction | 改 `target_distance_km` / `duration_min` |
+| InsertRestAction | 插入 Rest session（`session_type="rest", intensity="rest"`），后续顺延 |
+| RemoveSessionAction | 从 `sessions` 列表中移除 |
+
+Applier 不负责跨周操作——只修改 violation.target 所指向的 `WeeklyBlock`。
+
+---
+
+##### Validation Loop（验证闭环）
+
+修完之后不能直接返回——修复可能引入新违规。必须重新校验，形成闭环：
+
+```text
+Constraint Checker
+    ↓
+Repair Engine (修复一条最高优先级违规)
+    ↓
+Constraint Checker（重新校验）
+    ↓
+仍有违规且 attempts < max_attempts？
+    ↓ YES → Repair Engine 再修一条
+    ↓ NO  → 返回结果
+```
+
+停止条件（满足任一即停止）：
+
+```python
+check.passed == True       # 无违规
+score >= 95                # 健康度达标，跳过微调
+attempts >= max_attempts   # 达到上限（默认 3）
+```
+
+```python
+MAX_ATTEMPTS = 3
+```
+
+**典型场景——修复引入新违规：**
+
+```
+原计划违约：Tue intervals + Wed tempo 连续 Hard
+    ↓
+修复：Wed tempo → easy, Thu easy → tempo
+    ↓
+新违规：weekly_volume 超标
+    ↓
+再修：缩减 easy run 距离
+    ↓
+通过 ✓
+```
+
+---
+
+##### Repair Engine 主入口
+
+```python
+class RepairEngine:
+    @staticmethod
+    def repair(
+        draft_plan: dict,
+        violations: List[dict],
+        context: dict,
+        user_goal: str = "",
+        max_attempts: int = 3,
+    ) -> RepairResult:
+        """修复训练计划中的约束违规。
+
+        1. Violation Resolver → 排序违规
+        2. 逐条修复（Validation Loop）：
+           a. Action Generator → 生成候选动作
+           b. Plan Applier → 执行最优动作
+           c. Constraint Checker → 重新校验
+        3. 返回 RepairResult
+        """
+        ...
+
+class RepairResult(TypedDict):
+    repaired: bool
+    attempts: int
+    final_score: int
+    changes: List[RepairChange]
+    remaining_violations: List[dict]
+
+class RepairChange(TypedDict):
+    action: str              # "move_session" / "downgrade_session" / ...
+    session_id: str          # 被修改的 session
+    from: Any                # 修改前的值
+    to: Any                  # 修改后的值
+    reason: str              # 修复原因
+    cost: int                # 修复代价
+```
+
+---
+
+#### 6. Debt Manager（债务管理器 V2）
+#### 6. Debt Manager（债务管理器 V2）
 #### 6. Debt Manager（债务管理器 V2）
 
 记录未完成的关键训练，恢复后找机会补回。使系统具有**长期记忆**，而非每次分析完就结束。
