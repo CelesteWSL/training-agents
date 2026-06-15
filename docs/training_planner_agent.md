@@ -649,26 +649,38 @@ GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才
 
 
 ##### RecoveryConstraint（恢复约束）
+##### RecoveryConstraint（恢复约束）
 
 | 规则 | 阈值 | severity |
 |------|------|----------|
-| Hard Session 间隔 | ≥ 1 天（hard_gap_days=1） | critical |
-| 禁止连续 2 天 Hard | — | critical |
+| 连续 Hard 天数 | ≤ `max_consecutive_hard`（默认 1） | critical |
 
 ```python
-HARD_SESSIONS = {
-    "intervals",
-    "vo2max",
-    "threshold",
-}
-
-MODERATE_SESSIONS = {
-    "tempo",
-    "marathon_pace",
+RECOVERY_POLICY = {
+    "min_gap_days": 1,
+    "max_consecutive_hard": 1,
 }
 ```
 
-`is_hard(session)` 统一判定。Long Run 默认 Low，但若含 MP/Tempo 段则按实际强度判定。
+`is_hard(session)` 统一使用 `session.intensity` 判定——不依赖 `session_type`。
+
+- `intensity == "hard"` → Hard Session
+- `intensity == "moderate"` → Moderate Session
+- `intensity == "easy"` / `"rest"` → Low Session
+
+Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 设为 `"moderate"` 或 `"hard"`，统一走 `session.intensity` 判断。
+
+违例输出：
+
+```json
+{
+  "rule": "consecutive_hard_days",
+  "actual": 2,
+  "limit": 1
+}
+```
+
+`max_consecutive_hard` 可由 SRA 动态调节。例如 `cns_fatigue` 时可设为 0，直接生效。
 
 ##### VolumeConstraint（负荷约束）
 
