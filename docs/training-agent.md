@@ -1505,224 +1505,170 @@ Match_Strength 的取值规则：
 
 #### 职责
 
-Decision Engine 的职责是在安全边界内最大化训练收益。它接收四个 Analyst + State Recognition 的输出，裁决多个 Agent 的冲突信号，输出统一的训练动作建议。
+Decision Engine 的职责是在安全边界内最大化训练收益。它接收四个 Analyst + State Recognition 的输出，通过 **State Modifier → Waterfall Gate → Technique Modifier** 三步裁决，输出统一的训练动作建议。
 
-四个 Agent 实际上形成了：
-
-```text
-Recovery  = 身体状态
-Load      = 训练压力
-Performance = 能力表现
-Risk      = 安全边界
+```
+State Recognition → State Modifier（调阈值）
+    ↓
+Waterfall: Safety → Recovery → Load → Performance → Default
+    ↓                                    ↓
+Technique Modifier（并行）  ←───────────┘
+    ↓
+RulingResult（action + modifiers）
 ```
 
 优先级原则：**Risk > Recovery > Load > Performance**，高优先级直接截断，不进入下层判断。
 
 ---
 
-#### 分层裁决规则
+#### Step 1：State Modifier（SRA 阈值调节）
+
+State Recognition Agent 识别到的生理状态会动态调节 Gate 阈值：
+
+```python
+GATE_DEFAULTS = {
+    "recovery_score_low": 40,
+    "consecutive_hard_days_limit": 3,
+    "hr_drift_high": 10,
+    "acwr_high": 1.5,
+    "acwr_moderate_low": 1.3,
+    "ramp_rate_high": 0.2,
+    "recovery_debt_high": 20,
+}
+```
+
+| 生理状态 | severity | 调节项 |
+|---------|----------|--------|
+| `injury_onset_pattern` | 100 | 新增 Safety 规则：risk_level=="high" → full_rest |
+| `non_functional_overreaching` | 90 | acwr_high: 1.5→1.2, action_override: full_rest |
+| `cns_fatigue` | 80 | recovery_score_low: 40→55, consecutive_hard_days_limit: 3→2 |
+| `cardiovascular_strain` | 70 | hr_drift_high: 10→8 |
+| `muscular_fatigue` | 60 | 新增 Load 规则 |
+| `functional_overreaching` | 50 | recovery_score_low: 40→35, acwr_high: 1.5→1.6 |
+
+SRA 调节后的阈值与额外规则进入 Waterfall Gate。
+
+---
+
+#### Step 2：Waterfall Gate（分层裁决）
 
 全部基于明确阈值比对，纯硬编码规则，不依赖 LLM。按层级从上到下匹配，首次命中即返回。
 
 ---
 
-**Level 1：安全层（Safety Gate）**
-
-任何高风险状态直接截断训练计划。
+**Level 1：Safety Gate（安全层）**
 
 | Priority | 条件 | Action |
 |----------|------|--------|
 | 1 | `risk_level == "critical"` | `full_rest` |
 | 2 | `injury_risk_score >= 85` | `full_rest` |
-| 3 | `risk_level == "high" && recovery_score < 50` | `full_rest` |
-| 4 | `recovery_status == "critical" && fatigue_trend == "accumulating"` | `full_rest` |
-
-输出：
-
-```json
-{
-  "action": "full_rest",
-  "reason": "injury_risk"
-}
-```
+| 3 | `risk_level == "high"`（SRA: injury_onset_pattern） | `full_rest` |
+| 4 | `risk_level == "high" && recovery_score < 50` | `full_rest` |
 
 ---
 
-**Level 2：恢复层（Recovery Gate）**
-
-风险未触发后进入恢复判断。
+**Level 2：Recovery Gate（恢复层）**
 
 | Priority | 条件 | Action |
 |----------|------|--------|
-| 5 | `recovery_score < 40` | `recovery_run` |
+| 5 | `recovery_score < 40`（SRA 可调） | `recovery_run` |
 | 6 | `recovery_status == "warning"` | `recovery_run` |
 | 7 | `recovery_debt > 20` | `recovery_run` |
 | 8 | `fatigue_trend == "accumulating"` | `recovery_run` |
-| 9 | `hr_drift > 10` | `recovery_run` |
-
-输出：
-
-```json
-{
-  "action": "recovery_run"
-}
-```
-
-恢复跑含义：Zone1 心率区间，30-45 分钟，不允许质量课。
+| 9 | `hr_drift > 10`（SRA 可调） | `recovery_run` |
 
 ---
 
-**Level 3：负荷层（Load Gate）**
-
-恢复允许训练后检查负荷风险。
+**Level 3：Load Gate（负荷层）**
 
 | Priority | 条件 | Action |
 |----------|------|--------|
-| 10 | `acwr >= 1.5` | `reduce_load` |
+| 10 | `acwr >= 1.5`（SRA 可调） | `reduce_load` |
 | 11 | `ramp_rate >= 0.2` | `reduce_load` |
 | 12 | `acwr in [1.3, 1.5)` | `reduce_load` |
-| 13 | `weekly_volume` 超训练计划 20% 以上 | `reduce_load` |
 
-输出：
-
-```json
-{
-  "action": "reduce_load",
-  "reduction": 0.2
-}
-```
-
-减量训练含义：跑量下降 20-30%，取消高强度训练，保留基础有氧。
+SRA 可追加额外 Load 规则（muscular_fatigue 时），可由 `_load_add_rule` 指令触发。
 
 ---
 
-**Level 4：技术层（Technique Gate）**
-
-不是休息，而是训练内容调整——替换为技术/跑姿训练。
+**Level 4：Performance Gate（表现层）**
 
 | Priority | 条件 | Action |
 |----------|------|--------|
-| 14 | 存在 critical cadence flag | `technique_session` |
-| 15 | 存在 critical lr_balance flag | `technique_session` |
-| 16 | warning flags 数量 ≥ 3 个 | `technique_session` |
-
-输出：
-
-```json
-{
-  "action": "technique_session"
-}
-```
-
-技术训练含义：高步频练习、跑姿训练、坡道跑、神经肌肉训练。
+| 13 | `efficiency_trend == "improving"` | `quality_session` |
+| 14 | `decoupling_status == "good"` | `quality_session` |
 
 ---
 
-**Level 5：表现层（Performance Gate）**
-
-安全、恢复、负荷都正常后，决定能否执行质量训练。
+**Level 5：Default（默认）**
 
 | Priority | 条件 | Action |
 |----------|------|--------|
-| 17 | `efficiency_trend == "improving"` | `quality_session` |
-| 18 | `aerobic_trend` 良好 | `quality_session` |
-| 19 | `decoupling_status == "good"` | `quality_session` |
-
-输出：
-
-```json
-{
-  "action": "quality_session"
-}
-```
-
-高质量训练含义：间歇跑、阈值跑、VO2Max 训练。
+| 15 | 以上均未命中 | `normal_training` |
 
 ---
 
-**Level 6：默认策略**
+#### Step 3：Technique Modifier（技术修饰器）
 
-| Priority | 条件 | Action |
-|----------|------|--------|
-| 20 | 以上均未命中 | `normal_training` |
+**独立于 Waterfall Gate 并行执行**。根据 `performance_report.technique_flags` 生成技术修饰建议，叠加到最终裁决上。`full_rest` 时不激活。
 
-输出：
-
-```json
-{
-  "action": "normal_training"
-}
-```
+| 规则 | 条件 | 输出 |
+|------|------|------|
+| `cadence_drill` | cadence flag severity == critical | 步频练习 |
+| `gct_drill` | gct flag severity >= warning | 触地时间练习 |
+| `vo_drill` | vo flag severity >= warning | 垂直振幅练习 |
+| `lr_balance_drill` | lr_balance flag severity >= warning | 左右平衡练习 |
+| `technique_focus` | warning+ flags ≥ 2 且无 critical | 综合技术关注 |
 
 ---
 
 #### Action 汇总
 
-| Action | 含义 | 对应 status |
-|--------|------|-------------|
-| `full_rest` | 完全休息 | `critical` |
-| `recovery_run` | 恢复跑 | `warning` |
-| `reduce_load` | 减量训练 | `warning` |
-| `technique_session` | 技术训练 | `moderate` |
-| `quality_session` | 高质量训练 | `good` |
-| `normal_training` | 正常训练 | `good` |
+| Action | 含义 | status |
+|--------|------|--------|
+| `full_rest` | 建议完全休息 | `critical` |
+| `recovery_run` | 建议进行恢复跑 | `warning` |
+| `reduce_load` | 建议减量训练 | `warning` |
+| `quality_session` | 可以执行高质量训练 | `good` |
+| `normal_training` | 按目标正常训练 | `good` |
 
 ---
 
-#### 输出结构
+#### 输出：RulingResult
 
 ```json
 {
   "status": "warning",
+  "action": "reduce_load",
   "verdict": "建议减量训练",
-  "primary_facts": [
-    {
-      "source": "load",
-      "finding": "ACWR 1.62 >= 1.5，过度训练高风险，建议减量 20-30%",
-      "priority": 10,
-      "triggered": true
-    },
-    {
-      "source": "performance",
-      "finding": "运动效率持续改善，本可执行高质量训练",
-      "priority": 17,
-      "triggered": false
-    }
+  "sra_context": {
+    "primary_state": "cns_fatigue",
+    "confidence": 0.85,
+    "gate_affected": "recovery",
+    "adjustment": "recovery_score 阈值 40 → 55, consecutive_hard_days 阈值 3 → 2"
+  },
+  "gate_hit": {
+    "gate": "load",
+    "rule": "acwr >= 1.5",
+    "actual_value": 1.62,
+    "priority": 10
+  },
+  "modifiers": [
+    {"key": "cadence_drill", "label": "步频练习", "reason": "步频过低，需专项练习"}
   ]
 }
 ```
 
-> 注意：Decision Engine 仅输出 `status` / `verdict` / `primary_facts`。`primary_facts` 记录完整裁决链路，`triggered=true` 的为命中规则。
-> `headline` / `message` / `next_steps` 三个字段为空，由后续 LLM Report Generator 填充。
+| 字段 | 说明 |
+|------|------|
+| `status` | `critical` / `warning` / `good` |
+| `action` | 5 个训练动作之一 |
+| `verdict` | 中文裁决描述 |
+| `sra_context` | SRA 状态识别上下文（调节了哪些阈值），无命中时为 null |
+| `gate_hit` | 命中的 Gate 规则详情（gate、rule、actual_value、priority） |
+| `modifiers` | Technique Modifier 产出的技术修饰列表 |
 
----
-
-#### V2/V3 展望：Training Readiness Score（训练准备度）
-
-如果未来升级到 V2/V3，推荐将 Decision Engine 从分层规则表演进为 **Training Readiness Score**。
-
-先融合四个 Agent 的加权评分：
-
-```text
-Recovery Agent   30%
-Load Agent       25%
-Risk Agent       35%
-Performance Agent 10%
-```
-
-得到统一的 `readiness_score`（0~100），然后统一裁决：
-
-| Readiness | Action |
-|-----------|--------|
-| 0~20 | `full_rest` |
-| 20~40 | `recovery_run` |
-| 40~60 | `reduce_load` |
-| 60~80 | `normal_training` |
-| 80~100 | `quality_session` |
-
-这样后续连接 Debt Manager、Recovery Forecast、Constraint Optimizer、PB Prediction 都会非常自然。
-
-很多成熟训练平台（如 TrainingPeaks、WHOOP、Garmin）本质上都是先计算一个综合 readiness，再决定训练建议，而不是依赖几十条硬编码规则。V1 用规则表，V2 演进到 Readiness Score，是合理的路线。
+> Decision Engine 仅输出 `status` / `action` / `verdict` / `sra_context` / `gate_hit` / `modifiers`。最终的自然语言报告由后续 LLM Report Generator 基于这些结构化数据生成。
 
 ## 沟通层
 
@@ -1833,7 +1779,7 @@ prompt = f"""{system_prompt}
 
 === Decision Engine 裁决 ===
 裁决：{state["ruling"]["verdict"]}
-触发规则：{state["ruling"]["primary_facts"][触发的那条]["finding"]}
+触发规则：{state["ruling"]["gate_hit"]["rule"]}
 """
 ```
 
