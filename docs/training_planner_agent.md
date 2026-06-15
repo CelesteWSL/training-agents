@@ -561,37 +561,37 @@ class IntensityConstraint(BaseConstraint):  ...
     "passed": false,
     "violations": [
         {
-            "constraint": "volume",
-            "rule": "long_run_ratio",
             "severity": "warning",
+            "repair_hint": "reduce_long_run",
             "target": {"week": 5, "session_id": "w05_sun_long_run"},
             "actual": 18.0,
             "limit": 14.0,
             "message": "Long Run 18km 占周跑量 45%，超出 35% 上限"
+            "message": "Long Run 18km 占周跑量 45%，超出 35% 上限"
         },
         {
             "constraint": "recovery",
-            "rule": "hard_gap",
+            "rule": "consecutive_hard_days",
             "severity": "critical",
+            "repair_hint": "downgrade_session",
             "target": {"week": 5, "session_id": "w05_wed_tempo"},
-            "actual": 1,
-            "limit": 2,
-            "message": "Hard session 间隔不足（需 ≥ 2 天）"
-        }
+            "actual": 2,
+            "limit": 1,
+            "message": "连续 Hard 天数 2，超出上限 1"
     ]
 }
 ```
 
-| 字段 | 类型 | 说明 |
+| constraint | str | 所属约束：recovery / volume / intensity |
 |------|------|------|
 | constraint | str | 所属约束：goal / recovery / volume / intensity |
+| repair_hint | str | 修复指令：`reduce_long_run` / `downgrade_session` / `move_session` / `remove_secondary_quality` 等，Repair Engine 据此执行修复 |
 | rule | str | 违规规则标识 |
 | severity | str | critical > warning > info，Repair Engine 按此排序处理 |
 | target | dict | 定位信息：week + session_id，Repair Engine 据此精确修改 |
-| actual | float | 实际值 |
 | limit | float | 阈值上限 |
+| actual | float | 实际值 |
 | message | str | 人类可读描述 |
-
 最终由 Constraint Checker 汇总所有子结果：
 
 ```python
@@ -704,38 +704,49 @@ LONG_RUN_POLICY = {
 ```
 
 ##### IntensityConstraint（强度分布约束）
+##### IntensityConstraint（强度分布约束）
 
-按 **训练时长（training_minutes）** 统计，而非训练天数。
-
-| 规则 | 阈值 | severity |
-|------|------|----------|
-| Low 占比 | ≥ 80% 训练时长 | info |
-| Moderate 占比 | ≤ 10% 训练时长 | warning |
-| High 占比 | ≤ 10% 训练时长 | warning |
+按 **训练时长（training_minutes）** 统计，而非训练天数。阈值随训练阶段（phase）动态调整：
 
 ```python
 INTENSITY_POLICY = {
-    "low_min": 0.80,       # ≥ 80%
-    "moderate_max": 0.10,  # ≤ 10%
-    "high_max": 0.10,      # ≤ 10%
+    "base": {
+        "low_min": 0.80,
+        "moderate_max": 0.10,
+        "high_max": 0.10,
+    },
+    "build": {
+        "low_min": 0.75,
+        "moderate_max": 0.15,
+        "high_max": 0.10,
+    },
+    "peak": {
+        "low_min": 0.80,
+        "moderate_max": 0.18,
+        "high_max": 0.05,
+    },
+    "taper": {
+        "low_min": 0.85,
+        "moderate_max": 0.10,
+        "high_max": 0.05,
+    },
 }
 ```
 
-强度判定规则：
+校验时根据 `context.training_phase` 动态读取对应 phase 的阈值，而非固定 80/20。
+
+强度判定规则（统一使用 `session.intensity`，不依赖 `session_type`）：
 
 | session_type | intensity | 说明 |
 |-------------|-----------|------|
 | rest / recovery_run / easy_run | Low | 恢复和基础有氧 |
 | long_run（纯 Zone2） | Low | 默认长距离有氧 |
+| long_run（含 MP / Tempo 段） | Moderate | 按实际配速段判定 |
 | tempo | Moderate | 节奏跑 |
 | marathon_pace | Moderate | Zone3 专项配速跑 |
 | intervals / strides / vo2max | High | 高强度间歇 |
 
-与业界 80/20 极化训练原则一致，和 V2 基于心率数据的精确统计自然衔接。
-
-> **V2**：改为基于实际心率数据的精确统计——使用 ParsedActivity.hr_zones（Zone1~5 占比）计算 80/20 极化分布和 Zone3 陷阱（Zone3 占比 ≤ 10%）。受控的 marathon_pace 不计入 Zone3 Trap：仅 goal=marathon 且 MP Session ≤1 次/周时豁免。替代当前的课型定性映射。
-
----
+> **V2**：改为基于实际心率数据的精确统计——使用 ParsedActivity.hr_zones（Zone1~5 占比）计算极化分布和 Zone3 陷阱（Zone3 占比 ≤ 10%）。受控的 marathon_pace 不计入 Zone3 Trap：仅 goal=marathon 且 MP Session ≤1 次/周时豁免。替代当前的课型定性映射。
 
 #### 5. Repair Engine（修复引擎）
 
