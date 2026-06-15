@@ -1689,25 +1689,23 @@ SRA 可追加额外 Load 规则（muscular_fatigue 时），可由 `_load_add_ru
 #### 整体流程
 
 ```
-AgentState（已包含 6 路输出）
-    │
-    ├── recovery_report.summary
-    ├── load_report.summary
-    ├── performance_report.summary
-    ├── risk_report.summary
-    ├── state_recognition（Recognition Engine）
-    └── ruling（Decision Engine）
-            │
-            ▼
-      Prompt Builder
-            │
-            ▼
-          LLM
-            │
-            ▼
-      FinalReport.markdown
 ```
-
+recovery_report ──┐
+load_report ──────┤
+performance_report ┤
+risk_report ──────┤
+state_recognition ─┤
+ruling ───────────┘
+        │
+        ▼
+  Prompt Builder
+        │
+        ▼
+      LLM
+        │
+        ▼
+  FinalReport.markdown
+```
 ---
 
 #### Prompt Builder
