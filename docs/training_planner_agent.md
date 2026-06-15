@@ -555,16 +555,19 @@ class IntensityConstraint(BaseConstraint):  ...
 顶层 ConstraintChecker.check_all() 汇总为 ConstraintCheckerResult：
 
 ```json
+```json
 {
     "passed": false,
+    "score": 78,
     "violations": [
         {
+            "constraint": "volume",
+            "rule": "long_run_ratio",
             "severity": "warning",
             "repair": {"action": "reduce", "target": "long_run"},
             "target": {"week": 5, "session_id": "w05_sun_long_run"},
             "actual": 18.0,
             "limit": 14.0,
-            "message": "Long Run 18km 占周跑量 45%，超出 35% 上限"
             "message": "Long Run 18km 占周跑量 45%，超出 35% 上限"
         },
         {
@@ -576,16 +579,31 @@ class IntensityConstraint(BaseConstraint):  ...
             "actual": 2,
             "limit": 1,
             "message": "连续 Hard 天数 2，超出上限 1"
+        }
     ]
 }
 ```
 
-| constraint | str | 所属约束：recovery / volume / intensity |
+| 字段 | 类型 | 说明 |
 |------|------|------|
-| constraint | str | 所属约束：goal / recovery / volume / intensity |
-| repair | dict | 修复指令：`{"action": "downgrade", "target": "session"}` 等，含 `action`（必选）+ `target`/`from`/`to`（可选） |
-| rule | str | 违规规则标识 |
-|
+| `passed` | bool | 所有子约束都通过才为 true |
+| `score` | int | 计划健康度 0-100，从 100 开始按 violation 扣分：critical=-30, warning=-10, info=-2 |
+| `violations` | list | 违规列表，按 (severity, constraint_priority) 降序排列 |
+| `details` | dict | 分组保留各子约束结果（recovery/volume/intensity） |
+
+**Violation 字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `constraint` | str | 所属约束：recovery / volume / intensity |
+| `rule` | str | 违规规则标识 |
+| `severity` | str | critical > warning > info，Repair Engine 按此排序处理 |
+| `repair` | dict | 修复指令：`{"action": "downgrade", "target": "session"}` 等 |
+| `target` | dict | 定位信息：week + session_id，Repair Engine 据此精确修改 |
+| `actual` | float | 实际值 |
+| `limit` | float | 阈值上限 |
+| `message` | str | 人类可读描述 |
+
 **repair action 集合：**
 
 | action | target | 含义 |
@@ -602,30 +620,55 @@ handler = REPAIR_HANDLERS[repair["action"]]
 handler(plan, violation["target"], repair)
 ```
 
-| severity | str | critical > warning > info，Repair Engine 按此排序处理 |
-| target | dict | 定位信息：week + session_id，Repair Engine 据此精确修改 |
-| limit | float | 阈值上限 |
-| actual | float | 实际值 |
-| message | str | 人类可读描述 |
-最终由 Constraint Checker 汇总所有子结果：
+---
+
+**score 计算与用途：**
 
 ```python
+SEVERITY_SCORE = {"critical": -30, "warning": -10, "info": -2}
+
+score = 100 + sum(SEVERITY_SCORE[v["severity"]] for v in violations)
+score = max(0, score)
+```
+
+用途：
+1. **Report Generator**：`Training Plan Quality: 78/100`，一眼看出计划质量
+2. **Repair Engine early stop**：`if score >= 95: return` 跳过微调
+3. **V2 趋势图**：连续多日 score 可绘制训练计划健康度曲线
+
+**汇总逻辑：**
+
+```python
+def check_all(plan, context) -> ConstraintCheckerResult:
     details = {
         "recovery":  recovery_constraint.check(plan, context),
         "volume":    volume_constraint.check(plan, context),
         "intensity": intensity_constraint.check(plan, context),
     }
-    return ConstraintCheckerResult(
     violations = sorted(
         [v for r in details.values() for v in r.violations],
-        key=lambda v: (SEVERITY_ORDER[v.severity], CONSTRAINT_PRIORITY[v.constraint]),
+        key=lambda v: (SEVERITY_ORDER[v["severity"]], CONSTRAINT_PRIORITY[v["constraint"]]),
         reverse=True,
     )
+    score = 100 + sum(SEVERITY_SCORE[v["severity"]] for v in violations)
+    score = max(0, score)
+
+    return ConstraintCheckerResult(
+        passed=all(r.passed for r in details.values()),
+        score=score,
+        violations=violations,
+        details=details,
+    )
+```
 
 - `passed`：所有子约束都通过才为 true
-- `violations`：合并所有子约束的违规列表（保留 `details` 便于 Debug）
-- `violations`：合并所有子约束的违规列表，按 (severity, constraint_priority) 降序排列
+- `score`：从 100 递减，按 violation severity 扣分
+- `violations`：合并排序后的违规列表
 - `details`：分组保留各子约束结果，后续 Report Generator 和 Repair Engine 均可复用
+
+---
+
+**子约束优先级：**
 
 ```python
 SEVERITY_ORDER = {"critical": 3, "warning": 2, "info": 1}
@@ -637,40 +680,8 @@ CONSTRAINT_PRIORITY = {
 }
 ```
 
-Recovery 优先级最高（恢复永远第一），Intensity 最低。Repair Engine 按此顺序逐条修复，高优违规先处理。
+Recovery 优先级最高（恢复永远第一），Intensity 最低。
 
-**子约束优先级与排序：**
-
-
-**输入：** Policy + current_plan + user_goal
-
-**输出：** 标注了优先级的 plan
-
-根据用户目标，标记 GoalPriority Slot（优先保留，仅在 critical / full_rest 时才调整）：
-
-| 目标 | GoalPriority Slot | 原因 |
-|------|-----------------|------|
-| `marathon` | Long Run | 全马成绩依赖长距离耐力 |
-| `5km` | Interval / VO2Max | 5km 依赖速度耐力 |
-| `10km` | Tempo / Interval | 10km 依赖阈值能力 |
-| `half_marathon` | Long Run / Tempo | 半马依赖耐力+速度 |
-
-```python
-GOAL_PRIORITY = {
-    "marathon":       ["long_run"],
-    "half_marathon":  ["long_run", "primary_quality"],
-    "10km":           ["primary_quality", "secondary_quality"],
-    "5km":            ["primary_quality"],
-}
-```
-
-**降级链（减量时从先到后）：**
-
-```
-easy → secondary_quality → primary_quality → long_run（slot 级别，由 QUALITY_RESOLVER 解析为具体课型）
-```
-
-GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才被降级。
 
 ---
 
