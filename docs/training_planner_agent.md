@@ -698,7 +698,7 @@ RECOVERY_POLICY = {
 - `intensity == "easy"` → LOAD_SCORE 1
 - `intensity == "rest"` → LOAD_SCORE 0
 
-Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 按实际判定。
+Long Run 默认 easy，但若含 MP/Tempo 段则 `intensity` 按实际判定。
 
 **rolling_3day_load 规则**：任意连续 3 天的 LOAD_SCORE 总和超过阈值即违例。解决 `hard → moderate → hard` 模式漏检问题（moderate 本身有训练负荷，隔在中间不代表充分恢复）。
 
@@ -752,7 +752,6 @@ LONG_RUN_POLICY = {
 ```
 
 ##### IntensityConstraint（强度分布约束）
-##### IntensityConstraint（强度分布约束）
 
 按 **训练时长（training_minutes）** 统计，而非训练天数。阈值随训练阶段（phase）动态调整：
 
@@ -786,12 +785,12 @@ INTENSITY_POLICY = {
 强度判定规则（统一使用 `session.intensity`，不依赖 `session_type`）：
 
 | session_type | intensity | 说明 |
-|-------------|-----------|------|
-| rest / recovery_run / easy_run | Low | 恢复和基础有氧 |
-| long_run（纯 Zone2） | Low | 默认长距离有氧 |
-| long_run（含 MP / Tempo 段） | Moderate | 按实际配速段判定 |
-| tempo | Moderate | 节奏跑 |
-| marathon_pace | Moderate | Zone3 专项配速跑 |
+| rest / recovery_run / easy_run | rest / easy | 恢复和基础有氧 |
+| long_run（纯 Zone2） | easy | 默认长距离有氧 |
+| long_run（含 MP / Tempo 段） | moderate | 按实际配速段判定 |
+| tempo | moderate | 节奏跑 |
+| marathon_pace | moderate | Zone3 专项配速跑 |
+| intervals / strides / vo2max | hard | 高强度间歇 |
 | intervals / strides / vo2max | High | 高强度间歇 |
 
 > **V2**：改为基于实际心率数据的精确统计——使用 ParsedActivity.hr_zones（Zone1~5 占比）计算极化分布和 Zone3 陷阱（Zone3 占比 ≤ 10%）。受控的 marathon_pace 不计入 Zone3 Trap：仅 goal=marathon 且 MP Session ≤1 次/周时豁免。替代当前的课型定性映射。
