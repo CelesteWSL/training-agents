@@ -560,7 +560,7 @@ class IntensityConstraint(BaseConstraint):  ...
     "violations": [
         {
             "severity": "warning",
-            "repair_hint": "reduce_long_run",
+            "repair": {"action": "reduce", "target": "long_run"},
             "target": {"week": 5, "session_id": "w05_sun_long_run"},
             "actual": 18.0,
             "limit": 14.0,
@@ -571,7 +571,7 @@ class IntensityConstraint(BaseConstraint):  ...
             "constraint": "recovery",
             "rule": "consecutive_hard_days",
             "severity": "critical",
-            "repair_hint": "downgrade_session",
+            "repair": {"action": "downgrade", "target": "session"},
             "target": {"week": 5, "session_id": "w05_wed_tempo"},
             "actual": 2,
             "limit": 1,
@@ -583,8 +583,25 @@ class IntensityConstraint(BaseConstraint):  ...
 | constraint | str | 所属约束：recovery / volume / intensity |
 |------|------|------|
 | constraint | str | 所属约束：goal / recovery / volume / intensity |
-| repair_hint | str | 修复指令：`reduce_long_run` / `downgrade_session` / `move_session` / `remove_secondary_quality` 等，Repair Engine 据此执行修复 |
+| repair | dict | 修复指令：`{"action": "downgrade", "target": "session"}` 等，含 `action`（必选）+ `target`/`from`/`to`（可选） |
 | rule | str | 违规规则标识 |
+|
+**repair action 集合：**
+
+| action | target | 含义 |
+|--------|--------|------|
+| `downgrade` | `session` | 将当前 session 降级（hard→moderate, moderate→easy） |
+| `reduce` | `long_run` | 缩减 Long Run 距离 |
+| `reduce` | `volume` | 等比例缩减 easy run 距离 |
+| `move` | `session` | 将 session 移到其他日期 |
+| `remove` | `secondary_quality` | 删除 secondary_quality slot |
+
+```python
+repair = violation["repair"]
+handler = REPAIR_HANDLERS[repair["action"]]
+handler(plan, violation["target"], repair)
+```
+
 | severity | str | critical > warning > info，Repair Engine 按此排序处理 |
 | target | dict | 定位信息：week + session_id，Repair Engine 据此精确修改 |
 | limit | float | 阈值上限 |
@@ -660,7 +677,7 @@ GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才
 
 ##### RecoveryConstraint（恢复约束）
 
-| 规则 | 阈值 | severity | repair_hint |
+| 规则 | 阈值 | severity | repair |
 |------|------|----------|-------------|
 | 连续 Hard 天数 | ≤ `max_consecutive_hard`（默认 1） | critical | `downgrade_session` |
 | 3 日滚动负荷 | ≤ `rolling_3day_load_max`（默认 6） | warning | `downgrade_session` |
@@ -698,7 +715,7 @@ Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 按实际判定。
   "rule": "consecutive_hard_days",
   "actual": 2,
   "limit": 1,
-  "repair_hint": "downgrade_session"
+  "repair": {"action": "downgrade", "target": "session"}
 }
 ```
 
@@ -707,7 +724,7 @@ Long Run 默认 Low，但若含 MP/Tempo 段则 `intensity` 按实际判定。
   "rule": "rolling_3day_load",
   "actual": 8,
   "limit": 6,
-  "repair_hint": "downgrade_session"
+  "repair": {"action": "downgrade", "target": "session"}
 }
 ```
 
