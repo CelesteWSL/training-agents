@@ -529,7 +529,6 @@ Constraint Checker
 ├── RecoveryConstraint
 ├── VolumeConstraint
 └── IntensityConstraint
-└── IntensityConstraint
 ```
 
 每个子约束实现统一的 BaseConstraint 接口：
