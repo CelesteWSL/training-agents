@@ -1,4 +1,7 @@
 ﻿## Training Table Generator
+Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么办"——两者配合构成完整的训练教练系统。
+
+## Training Table Generator
 
 Training Table Generator 是训练计划系统的初始生成层，负责在用户初始化时生成完整的周期化训练表。它输出 TrainingTable，供 Training Planner Agent 后续动态调整。
 
@@ -372,10 +375,10 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
 class TrainingPlannerAgent:
     def adjust(self, input: PlannerInput) -> PlannerOutput:
         policy    = PolicyGenerator.generate(input.action, input.modifiers, input.user_goal)
-        draft     = PlanModifier.modify(policy, input.current_plan, input.analysis_context)
+        policy    = PolicyGenerator.generate(input.action, input.modifiers, input.user_goal)
+        plan      = GoalPrioritizer.assign(policy, input.current_plan, input.user_goal)
+        draft     = PlanModifier.modify(policy, plan, input.analysis_context)
         check     = ConstraintChecker.check_all(draft, input.analysis_context)
-        if not check.passed:
-            draft = RepairEngine.repair(draft, check.violations)
             check = ConstraintChecker.check_all(draft, input.analysis_context)
         changes   = diff(input.current_plan, draft)
         debts     = DebtManager.register(changes)
@@ -383,7 +386,7 @@ class TrainingPlannerAgent:
 ```
 
 流水线：**Policy Generator → Plan Modifier → Constraint Checker → Repair Engine → Final Plan**
-
+流水线：**Policy Generator → Goal Prioritizer → Plan Modifier → Constraint Checker → Repair Engine → Final Plan**
 注意：Constraint 的职责是验收（Validation），不是指导修改（Modification）。Repair Engine 才是修复的执行者。
 
 ---
@@ -438,11 +441,14 @@ class TrainingPlannerAgent:
 | `quality_session` | false | 0.0 | true | true |
 | `normal_training` | false | 0.0 | true | false |
 
+#### 2. Goal Prioritizer（目标优先级标注）
+
+
 > **降级映射表**由 Plan Modifier 负责：Interval/VO2Max → Easy(70%时长)、Tempo/Threshold → Easy(等时长)、Long Run → Easy(60%距离)。Policy Generator 只决定"是否降级"，不决定"降到什么程度"。
 
 ---
 
-#### 2. Plan Modifier（计划修改器）
+#### 3. Plan Modifier（计划修改器）
 
 根据 Policy Generator 的策略修改课表，产出修改后的计划草案。
 
@@ -481,7 +487,7 @@ Wed   Easy 10km
 Thu   Easy 8km          ← Tempo → Easy（降强度）
 Fri   Easy 8km
 Sat   Easy 10km
-Sun   Long Run 24km     ← 保留但减量 20%（GoalConstraint）
+Sun   Long Run 24km     ← 保留但减量 20%（Goal Prioritizer）
 ```
 
 **Adjustment Log（changes 字段）：**
@@ -505,14 +511,14 @@ Sun   Long Run 24km     ← 保留但减量 20%（GoalConstraint）
         "date": "2024-06-09",
         "original": "Long Run 30km",
         "updated": "Long Run 24km",
-        "reason": "Policy: reduce_volume_ratio 0.2, GoalConstraint: Long Run ≤ 35%"
+        "reason": "Policy: reduce_volume_ratio 0.2, Goal Prioritizer: Long Run ≤ 35%"
     }
 ]
 ```
 
 ---
 
-#### 3. Constraint Checker（约束校验器）
+#### 4. Constraint Checker（约束校验器）
 
 专业度的核心来源。位于 Plan Modifier 之后，作为验收层——验证修改后的计划是否满足约束，不负责修改课表。
 
@@ -520,9 +526,9 @@ Sun   Long Run 24km     ← 保留但减量 20%（GoalConstraint）
 
 ```
 Constraint Checker
-├── GoalConstraint
 ├── RecoveryConstraint
 ├── VolumeConstraint
+└── IntensityConstraint
 └── IntensityConstraint
 ```
 
@@ -533,9 +539,8 @@ class BaseConstraint:
     def check(self, plan, context) -> ConstraintResult:
         """只发现问题，不修改计划。"""
         ...
-
-class GoalConstraint(BaseConstraint):       ...
-class RecoveryConstraint(BaseConstraint):   ...
+class VolumeConstraint(BaseConstraint):     ...
+class IntensityConstraint(BaseConstraint):  ...
 class VolumeConstraint(BaseConstraint):     ...
 class IntensityConstraint(BaseConstraint):  ...
 ```
@@ -591,9 +596,7 @@ class IntensityConstraint(BaseConstraint):  ...
 最终由 Constraint Checker 汇总所有子结果：
 
 ```python
-def check_all(plan, context) -> ConstraintCheckerResult:
     details = {
-        "goal":      goal_constraint.check(plan, context),
         "recovery":  recovery_constraint.check(plan, context),
         "volume":    volume_constraint.check(plan, context),
         "intensity": intensity_constraint.check(plan, context),
@@ -609,9 +612,15 @@ def check_all(plan, context) -> ConstraintCheckerResult:
 - `violations`：合并所有子约束的违规列表（保留 `details` 便于 Debug）
 - `details`：分组保留各子约束结果，后续 Report Generator 和 Repair Engine 均可复用
 
-##### GoalConstraint（目标约束）
+位于 Policy Generator 与 Plan Modifier 之间。职责是根据用户目标给 WeeklyBlock 的 Sessions 标注 GoalPriority——告诉后续 Plan Modifier 和 Repair Engine 哪些课优先保留，哪些可先降级。
 
-根据用户目标，标记 GoalPriority Session（优先保留，仅在 critical / full_rest 时可调整）：
+这不是 Constraint（不校验 pass/fail），而是 Planning Policy——Long Run 被删掉不一定是错（疲劳 critical 时就应该删）。
+
+**输入：** Policy + current_plan + user_goal
+
+**输出：** 标注了优先级的 plan
+
+根据用户目标，标记 GoalPriority Slot（优先保留，仅在 critical / full_rest 时才调整）：
 
 | 目标 | GoalPriority Slot | 原因 |
 |------|-----------------|------|
@@ -632,8 +641,13 @@ GOAL_PRIORITY = {
 **降级链（减量时从先到后）：**
 
 ```
-easy → secondary_quality → primary_quality → long_run（slot 级别，由 Resolver 解析为具体课型）
+easy → secondary_quality → primary_quality → long_run（slot 级别，由 QUALITY_RESOLVER 解析为具体课型）
 ```
+
+GoalPriority 列出的 slot 处于链末端，仅在 critical / full_rest 时才被降级。
+
+---
+
 
 ##### RecoveryConstraint（恢复约束）
 
@@ -713,7 +727,7 @@ INTENSITY_POLICY = {
 
 ---
 
-#### 4. Repair Engine（修复引擎）
+#### 5. Repair Engine（修复引擎）
 
 接收 Constraint Checker 的违规列表，按 severity 排序后逐条修复。
 
@@ -748,7 +762,7 @@ draft_plan + violations
 
 ---
 
-#### 5. Debt Manager（债务管理器 V2）
+#### 6. Debt Manager（债务管理器 V2）
 
 记录未完成的关键训练，恢复后找机会补回。使系统具有**长期记忆**，而非每次分析完就结束。
 
@@ -801,7 +815,7 @@ Plan Modifier 安排 (status = scheduled)
 
 ---
 
-#### 6. Forecast Engine（V3 预留）
+#### 7. Forecast Engine（V3 预留）
 
 基于更新后的训练计划，预测比赛成绩，分析目标可达性。
 
@@ -867,7 +881,7 @@ updated_plan + user_goal + historical_data
 
 ---
 
-#### Performance Limitation Analysis（V2）
+#### 8. Performance Limitation Analysis（V2）
 
 负责识别和解决运动员的中长期能力短板，回答"为什么成绩上不去"：
 
