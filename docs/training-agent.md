@@ -1695,7 +1695,7 @@ AgentState（已包含 6 路输出）
     ├── load_report.summary
     ├── performance_report.summary
     ├── risk_report.summary
-    ├── state_pattern（Recognition Engine）
+    ├── state_recognition（Recognition Engine）
     └── ruling（Decision Engine）
             │
             ▼
@@ -1758,29 +1758,43 @@ AgentState（已包含 6 路输出）
 ```
 
 **上下文拼接：**
+**上下文拼接：**
 
 ```python
-prompt = f"""{system_prompt}
+recovery_text = recovery_report.get("summary") or "暂无数据"
+load_text = load_report.get("summary") or "暂无数据"
+performance_text = performance_report.get("summary") or "暂无数据"
+risk_text = risk_report.get("summary") or "暂无数据"
+recognition_text = _build_recognition_text(state_dict)
+modifiers_text = _build_modifiers_text(ruling)
 
+user_prompt = f"""
 === Recovery Coach 报告 ===
-{state["recovery_report"]["summary"]}
+{recovery_text}
 
 === Load Coach 报告 ===
-{state["load_report"]["summary"]}
+{load_text}
 
 === Performance Coach 报告 ===
-{state["performance_report"]["summary"]}
+{performance_text}
 
 === Risk Coach 报告 ===
-{state["risk_report"]["summary"]}
+{risk_text}
 
 === Recognition Engine 诊断 ===
-{format_states(state["state_pattern"])}
+{recognition_text}
 
 === Decision Engine 裁决 ===
-裁决：{state["ruling"]["verdict"]}
-触发规则：{state["ruling"]["gate_hit"]["rule"]}
+裁决：{ruling["verdict"]}
+动作：{ruling["action"]}
+技术修饰：{modifiers_text}
 """
+
+messages = [
+    SystemMessage(content=SYSTEM_PROMPT),
+    HumanMessage(content=user_prompt),
+]
+response = llm.invoke(messages)
 ```
 
 ---
