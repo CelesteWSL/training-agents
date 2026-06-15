@@ -1248,7 +1248,7 @@ Risk Agent      ─┘
 ---
 
 
-### State Recognition Agent
+### State Recognition Engine
 
 **节点函数**：`recognition_node(state: AgentState) → Dict`，纯规则引擎 + Pattern Matching，不调 LLM。
 
@@ -1260,7 +1260,7 @@ Risk Agent      ─┘
 
 #### 回答的问题
 
-State Recognition Agent 主要回答：
+State Recognition Engine 主要回答：
 
 - 为什么今天状态下降？
 - 为什么恢复能力下降？
@@ -1279,12 +1279,12 @@ State Recognition Agent 主要回答：
 
 #### 架构
 
-State Recognition Agent 是一个**纯规则引擎**，不依赖 LLM，不使用工具调用。它直接读取 AgentState 中各 Analyst 的结构化报告，通过硬编码规则匹配，输出识别到的生理状态列表。
+State Recognition Engine 是一个**纯规则引擎**，不依赖 LLM，不使用工具调用。它直接读取 AgentState 中各 Analyst 的结构化报告，通过硬编码规则匹配，输出识别到的生理状态列表。
 
 ```
 Recovery Report ──┐
 Load Report ──────┤
-Performance Report ├──→ State Recognition Agent ──→ 生理状态列表
+Performance Report ├──→ State Recognition Engine ──→ 生理状态列表
 Risk Report ──────┘        （纯规则引擎）
 ```
 
@@ -1523,7 +1523,7 @@ RulingResult（action + modifiers）
 
 #### Step 1：State Modifier（SRA 阈值调节）
 
-State Recognition Agent 识别到的生理状态会动态调节 Gate 阈值：
+State Recognition Engine 识别到的生理状态会动态调节 Gate 阈值：
 
 ```python
 GATE_DEFAULTS = {
