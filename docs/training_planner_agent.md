@@ -968,30 +968,44 @@ class BaseRepairAction:
 | `InsertRestAction` | 3 | 在两个 session 之间插入 rest day |
 | `RemoveSessionAction` | 5 | 删除非核心 session |
 
-**REPAIR_REGISTRY（违规类型 → 候选修复动作映射）：**
+**REPAIR_POLICY（约束类别 → 候选修复动作）：**
+
+不与具体 rule 耦合。新增 rule 只需归属到对应 constraint 类别，自动继承该类的修复动作列表。
 
 ```python
-REPAIR_REGISTRY = {
-    "consecutive_hard_days": [
+REPAIR_POLICY = {
+    "recovery": [
         MoveSessionAction(),
         DowngradeSessionAction(),
         InsertRestAction(),
         RemoveSessionAction(),
     ],
-    "rolling_3day_load": [
-        DowngradeSessionAction(),
-        MoveSessionAction(),
-    ],
-    "long_run_ratio": [
+    "volume": [
         ReduceDistanceAction(),
     ],
-    "weekly_volume_growth": [
-        ReduceDistanceAction(target="easy_runs"),
-    ],
-    "intensity_ratio": [
+    "intensity": [
         DowngradeSessionAction(),
     ],
 }
+```
+
+Action Generator 按 violation 的 `constraint` 字段查找：
+
+```python
+candidates = REPAIR_POLICY[violation.constraint]
+```
+
+例如新增 `zone3_trap` 规则，归属 `intensity` 类别，自动获得 `DowngradeSessionAction`，无需修改任何 registry：
+
+```python
+# Constraint Checker 侧：
+{
+    "constraint": "intensity",
+    "rule": "zone3_trap",
+    ...
+}
+
+# Repair Engine 侧：零改动，自动通过 REPAIR_POLICY["intensity"] 拿到 DowngradeSessionAction
 ```
 
 列表按 cost 升序排列。Action Generator 按序尝试，取第一个成功的（cost 最低的）。
