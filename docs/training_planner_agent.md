@@ -858,7 +858,7 @@ INTENSITY_POLICY = {
 
 ```
 Repair Engine
-├── Violation Resolver   → 排序违规，决定先修什么
+├── Violation Grouper     → 聚合违规，识别共享根因
 ├── Action Generator     → 生成候选修复动作
 ├── Plan Applier         → 执行修复
 └── Validation Loop      → 重新校验并迭代
@@ -1089,19 +1089,58 @@ Applier 不负责跨周操作——只修改 violation.target 所指向的 `Week
 
 ---
 
+##### Violation Grouping（违规聚合）
+
+单次循环修一条 violation 太保守，会产生大量重复计算。多个违规往往共享同一根因——同一个 session 可能同时触发 `consecutive_hard_days` 和 `rolling_3day_load`。
+
+先按 `group_key` 聚合：
+
+```python
+def group_violations(violations: List[Violation]) -> Dict[str, List[Violation]]:
+    groups = {}
+    for v in violations:
+        # group_key = 违规指向的 session + 周
+        key = f"{v.target.week}_{v.target.session_id}"
+        groups.setdefault(key, []).append(v)
+    return groups
+```
+
+示例：
+
+```
+Mon intervals → consecutive_hard_days (warning)
+Tue tempo      → consecutive_hard_days (warning)
+Wed intervals  → consecutive_hard_days (critical)
+               + rolling_3day_load    (warning)
+```
+
+聚合后：
+
+| group_key | sessions | violations | top_severity |
+|-----------|----------|------------|-------------|
+| `w03_mon_intervals` | 1 | `consecutive_hard_days` | warning |
+| `w03_tue_tempo` | 1 | `consecutive_hard_days` | warning |
+| `w03_wed_intervals` | 1 | `consecutive_hard_days, rolling_3day_load` | **critical** |
+
+按 `top_severity` 排序，先修 `w03_wed_intervals`。一次 move/downgrade 同时解决两个违规。
+
+---
+
 ##### Validation Loop（验证闭环）
 
-修完之后不能直接返回——修复可能引入新违规。必须重新校验，形成闭环：
+每次迭代修复**一个 group**（而非一条 violation），修完重新校验，形成闭环：
 
 ```text
 Constraint Checker
     ↓
-Repair Engine (修复一条最高优先级违规)
+Violation Grouping（聚合违规）
+    ↓
+Repair Engine (修复最高优先级 group)
     ↓
 Constraint Checker（重新校验）
     ↓
 仍有违规且 attempts < max_attempts？
-    ↓ YES → Repair Engine 再修一条
+    ↓ YES → 重新 Grouping，再修一组
     ↓ NO  → 返回结果
 ```
 
@@ -1117,22 +1156,23 @@ attempts >= max_attempts   # 达到上限（默认 3）
 MAX_ATTEMPTS = 3
 ```
 
-**典型场景——修复引入新违规：**
+**典型场景——一次修一组：**
 
 ```
-原计划违约：Tue intervals + Wed tempo 连续 Hard
+原计划违约：Mon intervals + Tue tempo + Wed intervals
+    → consecutive_hard_days (Mon, Tue, Wed 各一条)
+    → rolling_3day_load  (Mon-Wed 一条)
     ↓
-修复：Wed tempo → easy, Thu easy → tempo
+Grouping: w03_wed_intervals = [consecutive_hard_days(critical), rolling_3day_load(warning)]
     ↓
-新违规：weekly_volume 超标
+修复：move Wed intervals → Thu（一次动作同时消两条违规）
     ↓
-再修：缩减 easy run 距离
+重新校验：consecutive_hard_days 全部清除
     ↓
 通过 ✓
 ```
 
 ---
-
 ##### Repair Engine 主入口
 
 ```python
@@ -1147,8 +1187,8 @@ class RepairEngine:
     ) -> RepairResult:
         """修复训练计划中的约束违规。
 
-        1. Violation Resolver → 排序违规
-        2. 逐条修复（Validation Loop）：
+        1. Violation Grouper  → 聚合违规，按 group 排序
+        2. 逐组修复（Validation Loop）：
            a. Action Generator → 生成候选动作
            b. Plan Applier → 执行最优动作
            c. Constraint Checker → 重新校验
