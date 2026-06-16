@@ -404,7 +404,8 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
         "passed": true,
         "violations": []
     },
-    "repair_log": null
+    "repair_log": null,
+    "readable_summary": "## 本周训练调整\\n\\n**裁决**：减量训练 — 你今天的 CNS 疲劳指标偏高，需要降低强度保护恢复。\\n\\n### 课表变化\\n\\n| 日期 | 原计划 | 调整后 | 原因 |\\n|------|--------|--------|------|\\n| 周二 | Interval 8×400m | Easy 8km | 降强度 |\\n| 周四 | Tempo 8km | Easy 8km | 降强度 |\\n| 周日 | Long Run 28km | Long Run 16.7km | 周跑量超限，缩减至安全比例 |\\n\\n### 本周要点\\n- 周二、周四的强度课降为轻松跑，让 CNS 充分恢复\\n- 周日的长距离从 28km 缩减到 16.7km，确保不超过周跑量 40%\\n- 每次跑步注意步频练习\\n\\n> 预计 3-5 天后 CNS 恢复，届时自动回调强度。保持耐心，恢复优先。"
 }
 ```
 
@@ -415,6 +416,7 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
 | `changes` | `List[Adjustment]` | 逐条修改记录 |
 | `constraint_check` | `ConstraintCheckerResult` | 约束校验结果 |
 | `repair_log` | `dict` or `null` | 修复引擎日志 |
+| `readable_summary` | `str` | 面向用户的可读摘要（Markdown），可直接推送/展示 |
 
 ### 核心设计原则
 
