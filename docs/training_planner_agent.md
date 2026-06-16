@@ -1331,9 +1331,9 @@ LLM 调用 → 本周要点（语境部分）
     "state_label":     "CNS 疲劳",
     "state_recovery":  "3-5 天",
     "changes": [
-        {"day": "周二", "from": "Interval 8×400m", "to": "Easy 8km", "display_reason": "降强度"},
-        {"day": "周四", "from": "Tempo 8km",     "to": "Easy 8km", "display_reason": "降强度"},
-        {"day": "周日", "from": "Long Run 28km",  "to": "Long Run 16.7km", "display_reason": "缩减至安全比例"},
+        {"date": "2026-06-18", "original": "Interval 8×400m", "updated": "Easy 8km", "display_reason": "降强度"},
+        {"date": "2026-06-18", "original": "Tempo 8km",     "updated": "Easy 8km", "display_reason": "降强度"},
+        {"date": "2026-06-22", "original": "Long Run 28km",  "updated": "Long Run 16.7km", "display_reason": "缩减至安全比例"},
     ],
     "repair_reasons": ["周跑量占比从 49% 缩减至 40%"],
     "technique_reminders": ["步频练习"],
@@ -1341,7 +1341,7 @@ LLM 调用 → 本周要点（语境部分）
 ```
 
 - `verdict` / `state_label` / `state_recovery` 来自 input，`state_recovery` 查内置映射表
-- `changes` 来自 `changes[]` 列表，`display_reason` 由 Plan Modifier / Repair Engine 写入
+- `changes` 来自 `changes[]` 列表（`Adjustment` 结构），`display_reason` 由 SummaryFormatter 从 `reason` 映射生成
 - `repair_reasons` 来自 `repair.changes[].reason`
 - `technique_reminders` 来自 `input.modifiers[].label`
 
