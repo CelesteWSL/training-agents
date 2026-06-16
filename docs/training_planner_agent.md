@@ -637,7 +637,6 @@ class IntensityConstraint(BaseConstraint):  ...
 顶层 ConstraintChecker.check_all() 汇总为 ConstraintCheckerResult：
 
 ```json
-```json
 {
     "passed": false,
     "score": 78,
@@ -646,7 +645,6 @@ class IntensityConstraint(BaseConstraint):  ...
             "constraint": "volume",
             "rule": "long_run_ratio",
             "severity": "warning",
-            "repair": {"action": "reduce", "target": "long_run"},
             "target": {"week": 5, "session_id": "w05_sun_long_run"},
             "actual": 18.0,
             "limit": 14.0,
@@ -656,7 +654,6 @@ class IntensityConstraint(BaseConstraint):  ...
             "constraint": "recovery",
             "rule": "consecutive_hard_days",
             "severity": "critical",
-            "repair": {"action": "downgrade", "target": "session"},
             "target": {"week": 5, "session_id": "w05_wed_tempo"},
             "actual": 2,
             "limit": 1,
@@ -680,27 +677,10 @@ class IntensityConstraint(BaseConstraint):  ...
 | `constraint` | str | 所属约束：recovery / volume / intensity |
 | `rule` | str | 违规规则标识 |
 | `severity` | str | critical > warning > info，Repair Engine 按此排序处理 |
-| `repair` | dict | 修复指令：`{"action": "downgrade", "target": "session"}` 等 |
 | `target` | dict | 定位信息：week + session_id，Repair Engine 据此精确修改 |
 | `actual` | float | 实际值 |
 | `limit` | float | 阈值上限 |
 | `message` | str | 人类可读描述 |
-
-**repair action 集合：**
-
-| action | target | 含义 |
-|--------|--------|------|
-| `downgrade` | `session` | 将当前 session 降级（hard→moderate, moderate→easy） |
-| `reduce` | `long_run` | 缩减 Long Run 距离 |
-| `reduce` | `volume` | 等比例缩减 easy run 距离 |
-| `move` | `session` | 将 session 移到其他日期 |
-| `remove` | `secondary_quality` | 删除 secondary_quality slot |
-
-```python
-repair = violation["repair"]
-handler = REPAIR_HANDLERS[repair["action"]]
-handler(plan, violation["target"], repair)
-```
 
 ---
 
@@ -808,7 +788,6 @@ Long Run 默认 easy，但若含 MP/Tempo 段则 `intensity` 按实际判定。
   "rule": "consecutive_hard_days",
   "actual": 2,
   "limit": 1,
-  "repair": {"action": "downgrade", "target": "session"}
 }
 ```
 
@@ -817,7 +796,6 @@ Long Run 默认 easy，但若含 MP/Tempo 段则 `intensity` 按实际判定。
   "rule": "rolling_3day_load",
   "actual": 8,
   "limit": 6,
-  "repair": {"action": "downgrade", "target": "session"}
 }
 ```
 
@@ -884,7 +862,6 @@ INTENSITY_POLICY = {
 | tempo | moderate | 节奏跑 |
 | marathon_pace | moderate | Zone3 专项配速跑 |
 | intervals / strides / vo2max | hard | 高强度间歇 |
-| intervals / strides / vo2max | High | 高强度间歇 |
 
 > **V2**：改为基于实际心率数据的精确统计——使用 ParsedActivity.hr_zones（Zone1~5 占比）计算极化分布和 Zone3 陷阱（Zone3 占比 ≤ 10%）。受控的 marathon_pace 不计入 Zone3 Trap：仅 goal=marathon 且 MP Session ≤1 次/周时豁免。替代当前的课型定性映射。
 
