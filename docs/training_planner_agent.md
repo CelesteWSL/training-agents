@@ -1302,9 +1302,6 @@ class RepairChange(TypedDict):
 
 ---
 
-
----
-
 #### 6. SummaryFormatter（摘要生成器）
 
 将 Planner 的结构化输出转换为面向跑者的自然语言摘要。
@@ -1380,6 +1377,30 @@ DISPLAY_REASON_MAP = {
   计划变更：{changes_json}
   修复记录：{repair_changes_json}
   技术提醒：{modifier_labels}
+```
+
+**运行结果示例（readable_summary 渲染后）：**
+
+```markdown
+## 本周训练调整
+
+**裁决**：减量训练 — CNS 疲劳指标偏高，降低强度保护恢复。
+
+### 课表变化
+
+| 日期 | 原计划 | 调整后 | 原因 |
+|------|--------|--------|------|
+| 2026-06-18 | Interval 8×400m | Easy 8km | 降强度 |
+| 2026-06-18 | Tempo 8km | Easy 8km | 降强度 |
+| 2026-06-22 | Long Run 28km | Long Run 16.7km | 缩减至安全比例 |
+
+### 本周要点
+
+- 周二和周四的强度课已降为轻松跑，给中枢神经系统充分的恢复窗口
+- 周日长距离从 28km 缩减至 16.7km，修复引擎自动将周跑量占比从 49% 压回 40% 安全线
+- 每次跑步注意步频练习，低步频会增加关节冲击
+
+> 当前 CNS 疲劳预计 3-5 天内恢复，届时系统会自动回调强度。保持耐心，恢复优先 💪
 ```
 
 > `display_reason`（如"降强度"）由 SummaryFormatter 内部从 `Adjustment.reason` 查表映射，模板生成表格用，不注入 prompt。
