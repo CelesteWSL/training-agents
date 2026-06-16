@@ -1,4 +1,4 @@
-## Training Table Generator
+﻿## Training Table Generator
 
 Training Table Generator 是训练计划系统的初始生成层，负责在用户初始化时生成完整的周期化训练表。它输出 TrainingTable，供 Training Planner Agent 后续动态调整。
 
@@ -377,7 +377,7 @@ class TrainingPlannerAgent:
         plan      = GoalPrioritizer.assign(policy, input.current_plan, input.user_goal)
         draft     = PlanModifier.modify(policy, plan, input.analysis_context)
         check     = ConstraintChecker.check_all(draft, input.analysis_context)
-        repair    = RepairEngine.repair(draft, check.violations, input.analysis_context, user_goal=input.user_goal)
+        repair    = RepairEngine.repair(draft, check.violations, input.analysis_context)
         changes   = diff(input.current_plan, repair.plan)
         debts     = DebtManager.register(changes)
         return PlannerOutput(repair.plan, changes, repair, debts)
@@ -868,8 +868,10 @@ Repair Engine
 ##### 输入
 
 ```json
-draft_plan + violations + analysis_context + user_goal
+draft_plan + violations + analysis_context
 ```
+
+> Repair Engine 不需要 `user_goal`——Goal Prioritizer 已将目标编码为 `session.goal_priority` 和 `session.priority_level`。Repair Engine 只读取这些字段，不关心"marathon"或"5km"等业务概念。
 
 ##### 输出
 
@@ -1224,7 +1226,6 @@ class RepairEngine:
         draft_plan: dict,
         violations: List[dict],
         context: dict,
-        user_goal: str = "",
         max_attempts: int = 3,
     ) -> RepairResult:
         """修复训练计划中的约束违规。
@@ -1232,8 +1233,9 @@ class RepairEngine:
         1. Violation Grouper  → 聚合违规，按 group 排序
         2. 逐组修复（Validation Loop）：
            a. Action Generator → 生成候选动作
-           b. Plan Applier → 执行最优动作
-           c. Constraint Checker → 重新校验
+           b. Action Evaluator → Dry Run 模拟 + 打分，选最优
+           c. Plan Applier → 执行最优动作
+           d. Constraint Checker → 重新校验
         3. 返回 RepairResult
         """
         ...
