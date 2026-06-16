@@ -1,4 +1,4 @@
-﻿## Training Table Generator
+## Training Table Generator
 
 Training Table Generator 是训练计划系统的初始生成层，负责在用户初始化时生成完整的周期化训练表。它输出 TrainingTable，供 Training Planner Agent 后续动态调整。
 
@@ -461,18 +461,12 @@ current_plan + plan_metadata.goal
 | `goal_priority` | `bool` | 该 session 是否为 GoalPriority session |
 | `priority_level` | `int` | 1（最高，GoalPriority） / 2（quality session） / 3（easy/rest） |
 
-**标注规则：**
+**标注规则（Goal Prioritizer 内部实现，不对外暴露为 `GOAL_SESSION_MAP`）：**
 
-```python
-GOAL_SESSION_MAP = {
-    "marathon":        "long_run",
-    "half_marathon":   "marathon_pace",
-    "10km":            "intervals",
-    "5km":             "intervals",
-}
-```
-
-- 匹配到 `GOAL_SESSION_MAP[goal]` 的 session → `goal_priority=true, priority_level=1`
+- `session_type` 与 `user_goal` 匹配 → `goal_priority=true, priority_level=1`
+  - marathon → long_run
+  - half_marathon → marathon_pace
+  - 10km / 5km → intervals
 - 其他 quality session（tempo, intervals, threshold, strides）→ `goal_priority=false, priority_level=2`
 - easy_run / recovery_run / rest → `goal_priority=false, priority_level=3`
 
@@ -1113,7 +1107,7 @@ OVERRIDE_POLICY = {
 Action Evaluator 对所有候选动作做 simulate → score 后择优。GoalPriority Override 的作用是：在候选列表中排除 RemoveSessionAction（如果 severity 不允许）。
 这样 Action Evaluator 自然地对所有候选动作做评价，goal_priority=true 的 session，RemoveSessionAction 只在 `critical` severity 下才进入候选列表——不需要把 `full_rest` 写死为唯一路径。
 
-> **为何不在 Repair Engine 内重复 `GOAL_SESSION_MAP`：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
+> **为何不在 Repair Engine 内重复 GoalPriority 推导：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
 
 ---
 
