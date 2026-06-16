@@ -77,7 +77,8 @@ class ChangeEntry(TypedDict):
     field:                str
     from_value:           Any
     to_value:             Any
-    reason:               str
+    reason:               str               # 机器可读原因，如 "Policy: downgrade_high_intensity"
+    display_reason:       str               # 用户可读原因，如 "降强度"、"缩减至安全比例"
 
 class DailySession(TypedDict):
     session_id:           str               # 不可变标识符，全局唯一。activity log / debt manager / report 均引用
