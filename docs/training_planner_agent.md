@@ -962,7 +962,7 @@ class BaseRepairAction:
 
 | Action | Cost | 含义 |
 |--------|------|------|
-| `MoveSessionAction` | 1 | 将 session 移到邻近空闲日 |
+| `MoveSessionAction` | 1 | 将 session 移到邻近空闲 slot，不顺延后续 session |
 | `ReduceDistanceAction` | 1 | 缩减距离 |
 | `DowngradeSessionAction` | 2 | 降级强度（hard→moderate, moderate→easy, easy→rest） |
 | `InsertRestAction` | 3 | 在两个 session 之间插入 rest day |
@@ -1053,14 +1053,14 @@ score = (
 原计划：
 
 ```
-Mon easy  |  Tue intervals  |  Wed tempo  |  Thu easy  |  Fri long_run
+Mon easy  |  Tue intervals  |  Wed tempo  |  Thu rest   |  Fri long_run
 ```
 
 违规：Tue intervals + Wed tempo 连续 Hard。
 
 | 方案 | 动作 | 结果 | Cost | Score |
 |------|------|------|------|:---:|
-| **方案1（推荐）** | MoveSession | Wed tempo → Thu, Thu easy → Fri | 1 | **95** |
+| **方案1（推荐）** | MoveSession | Wed tempo → Thu（空闲 slot），不触动其他 session | 1 | **95** |
 | 方案2 | DowngradeSession | Wed tempo → easy | 2 | 93 |
 | 方案3 | InsertRest | Wed 插入 rest，后续顺延 | 3 | 90 |
 
@@ -1125,7 +1125,7 @@ Remove goal_priority session → GOAL_PENALTY=100, 但仍可能是唯一解
 
 | 动作 | 修改内容 |
 |------|----------|
-| MoveSessionAction | 改 `date` / `day_of_week` / `session_id`，后续 session 日期顺延 |
+| MoveSessionAction | 改 `date` / `day_of_week` / `session_id`，仅改目标 session，不顺延 |
 | DowngradeSessionAction | 改 `session_type` / `intensity` / `hr_zone` / `description` |
 | ReduceDistanceAction | 改 `target_distance_km` / `duration_min` |
 | InsertRestAction | 插入 Rest session（`session_type="rest", intensity="rest"`），后续顺延 |
