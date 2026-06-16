@@ -1320,7 +1320,22 @@ LLM 调用 → 本周要点（语境部分）
 拼接 → readable_summary
 ```
 
-**变化表格模板（机械部分）：**
+**拼接逻辑：**
+
+```python
+def format(action, changes, modifiers, repair) -> str:
+    parts = ['## 本周训练调整', '']
+    parts.append(f'**裁决**：{VERDICT_MAP[action]}')
+    parts.extend(['', '### 课表变化', ''])
+    parts.append(build_change_table(changes))
+    parts.extend(['', '### 本周要点', ''])
+    parts.append(llm_generate(prompt))
+    return '\n'.join(parts)
+```
+
+固定标题（`## 本周训练调整`、`### 课表变化`、`### 本周要点`）由 `format()` 硬编码拼接。裁决行来自 `VERDICT_MAP[action]`。
+
+**变化表格模板：**
 
 遍历 `changes`（`List[Adjustment]`），逐行生成：
 
