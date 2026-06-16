@@ -81,7 +81,6 @@ class ChangeEntry(TypedDict):
     display_reason:       str               # 用户可读原因，如 "降强度"、"缩减至安全比例"
 
 class DailySession(TypedDict):
-    session_id:           str               # 不可变标识符，全局唯一。activity log / debt manager / report 均引用
 
     schedule:             SessionSchedule
     prescription:         SessionPrescription
@@ -374,6 +373,9 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
         "date": "2026-06-15",
         "physiological_states": ["cns_fatigue"],
         "ruling_history": [...]
+        "stimulus_gaps": {
+            "long_run": {"days_missing": 14, "expected_frequency_days": 7, "gap_ratio": 2.0, "severity": "high"}
+        }
     }
 }
 ```
@@ -381,10 +383,11 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `action` | `str` | Decision Engine 裁决：`full_rest` / `recovery_run` / `reduce_load` / `quality_session` / `normal_training` |
+| `desired_stimulus` | `List[str]` | Intent Tracker + Decision Engine 输出的优先刺激类型，Plan Generator 据此安排 session |
 | `modifiers` | `List[TechniqueModifier]` | 技术修饰器列表（可空），含 `key` `label` `reason` |
 | `user_goal` | `str` | 用户训练目标：`5km` / `10km` / `half_marathon` / `marathon` |
 | `current_plan` | `TrainingPlan` | 当前生效的训练计划 |
-| `analysis_context` | `dict` | 当日分析上下文（生理状态、裁决历史等） |
+| `analysis_context` | `dict` | 当日分析上下文（生理状态、裁决历史、stimulus_gaps 等） |
 
 ### 输出
 
@@ -398,7 +401,6 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
             "original": "Interval 8×400m",
             "updated": "Easy 8km",
             "reason": "Policy: remove_high_intensity",
-            "debt_created": "debt_20260618_interval"
         }
     ],
     "constraint_check": {
@@ -438,7 +440,6 @@ class TrainingPlannerAgent:
         check     = ConstraintChecker.check_all(draft, input.analysis_context)
         repair    = RepairEngine.repair(draft, check.violations, input.analysis_context)
         changes   = diff(input.current_plan, repair.plan)
-        debts     = DebtManager.register(changes)
         summary   = SummaryFormatter.format(
             action     = input.action,
             modifiers  = input.modifiers,
@@ -446,7 +447,7 @@ class TrainingPlannerAgent:
             changes    = changes,
             repair     = repair,
         )
-        return PlannerOutput(repair.plan, changes, repair, debts, summary)
+        return PlannerOutput(repair.plan, changes, repair, summary)
 ```
 
 流水线：**Policy Generator → Goal Prioritizer → Plan Modifier → Constraint Checker → Repair Engine → SummaryFormatter → Final Plan**
@@ -536,7 +537,7 @@ current_plan + plan_metadata.goal
 - 其他 quality session（tempo, intervals, threshold, strides）→ `metadata.goal_priority=false, metadata.priority_level=PriorityLevel.IMPORTANT`
 - easy_run / recovery_run / rest → `metadata.goal_priority=false, metadata.priority_level=PriorityLevel.NORMAL`
 
-> **关键设计决策：GoalPriority 由 Goal Prioritizer 写入 session 字段，下游模块（Plan Modifier、Constraint Checker、Repair Engine、Debt Manager）只读取 `goal_priority` / `priority_level`，不重新推导。** 这避免了"GoalPriority 识别规则变更时，Repair Engine 忘记同步"的双份逻辑风险。
+> **关键设计决策：GoalPriority 由 Goal Prioritizer 写入 session 字段，下游模块（Plan Modifier、Constraint Checker、Repair Engine）只读取 `goal_priority` / `priority_level`，不重新推导。** 这避免了"GoalPriority 识别规则变更时，Repair Engine 忘记同步"的双份逻辑风险。
 
 ---
 
@@ -547,7 +548,7 @@ current_plan + plan_metadata.goal
 **输入：**
 
 ```json
-policy + constraints + debts + current_plan
+policy + constraints + current_plan
 ```
 
 **输出：**
@@ -591,7 +592,6 @@ Sun   Long Run 24km     ← 保留但减量 20%（Goal Prioritizer）
         "original": "Interval 8×400m",
         "updated": "Easy 8km",
         "reason": "Policy: remove_high_intensity",
-        "debt_created": "debt_20240604_interval"
     },
     {
         "date": "2024-06-06",
@@ -1333,7 +1333,7 @@ def format(action, states, changes, modifiers, repair) -> str:
     return '\n'.join(parts)
 ```
 
-固定标题由 `format()` 硬编码拼接，裁决行来自 `VERDICT_MAP[action]`。`format()` 由 `TrainingPlannerAgent.adjust()` 在 DebtManager 之后调用，传入 `action / states / changes / modifiers / repair`。
+固定标题由 `format()` 硬编码拼接，裁决行来自 `VERDICT_MAP[action]`。`format()` 由 `TrainingPlannerAgent.adjust()` 在 RepairEngine 之后调用，传入 `action / states / changes / modifiers / repair`。
 
 **变化表格模板：**
 
@@ -1425,58 +1425,103 @@ LLM 调用失败时，模板引擎兜底生成简化版要点。`readable_summar
 
 ---
 
-#### 7. Debt Manager（债务管理器 V2）
+---
 
-记录未完成的关键训练，恢复后找机会补回。使系统具有**长期记忆**，而非每次分析完就结束。
+#### 7. Training Intent Tracker（训练意图追踪器）
 
-**TrainingDebt 结构：**
+定位：轻量级 Feature Generator。从 History + Goal + Current Date 实时计算关键训练刺激的缺失情况，注入 `analysis_context.stimulus_gaps`，作为 Decision Engine 辅助信号。
 
-```json
-{
-    "debt_id": "debt_20240601_threshold",
-    "type": "threshold",
-    "original_date": "2024-06-01",
-    "missed_reason": "state_cns_fatigue",
-    "priority": 2,
-    "status": "pending",
-    "expiry_date": "2024-06-08"
+- ✓ 不维护状态机（无 pending/scheduled/cleared/expired）
+- ✓ 不持久化（每次实时计算）
+- ✓ 不参与 `Planner.adjust()`
+- ✓ 不修改训练计划
+- ✓ 仅作为 Decision Engine 辅助信号
+
+**STIMULUS_CONFIG（每类刺激独立的期望频率）：**
+
+```python
+STIMULUS_CONFIG = {
+    "long_run":       {"expected_frequency_days": 7},
+    "threshold":      {"expected_frequency_days": 7},
+    "intervals":      {"expected_frequency_days": 10},
+    "tempo":          {"expected_frequency_days": 7},
+    "marathon_pace":  {"expected_frequency_days": 10},
+    "strength":       {"expected_frequency_days": 10},
 }
 ```
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `debt_id` | `str` | 唯一标识 |
-| `type` | `str` | 训练类型：`threshold` / `interval` / `long_run` / `tempo` |
-| `original_date` | `str` | 原定日期 |
-| `missed_reason` | `str` | 跳过的原因（Coach coaching_action 或 physiological_states） |
-| `priority` | `int` | 1（最高）~ 3（最低） |
-| `status` | `str` | `pending` / `scheduled` / `cleared` / `expired` |
-| `expiry_date` | `str` | 债务有效期，过期自动 clear（避免无限期追债） |
+**severity 动态计算（基于 gap_ratio，非绝对天数）：**
 
-**生命周期：**
+```python
+ratio = days_missing / stimulus.expected_frequency_days
 
-```
-训练被策略取消
-    ↓
-debt 登记 (status = pending)
-    ↓
-恢复后 Constraint Checker 放行
-    ↓
-Plan Modifier 安排 (status = scheduled)
-    ↓
-完成训练 → status = cleared
-超时未还 → status = expired
+ratio <= 1.0 → "none"
+ratio <= 1.5 → "low"
+ratio <= 2.0 → "medium"
+ratio >  2.0 → "high"
 ```
 
-**优先级规则：**
+**stimulus_gaps 输出结构：**
 
-| priority | 条件 | 示例 |
-|----------|------|------|
-| 1 | 与比赛目标直接相关的 GoalPriority Session | marathon → Long Run |
-| 2 | 重要的质量训练 | Threshold / Interval |
-| 3 | 一般的质量训练 | Tempo / Strides |
+```python
+stimulus_gaps = {
+    "long_run": {
+        "days_missing": 14,
+        "expected_frequency_days": 7,
+        "gap_ratio": 2.0,
+        "severity": "high",
+    },
+    "threshold": {
+        "days_missing": 10,
+        "expected_frequency_days": 7,
+        "gap_ratio": 1.43,
+        "severity": "low",
+    },
+}
+```
 
----
+**Goal 驱动 target_stimulus（不同目标/阶段追踪不同刺激）：**
+
+```python
+def get_target_stimulus(goal: str, phase: str) -> List[str]:
+    BASE = {
+        "marathon":       ["long_run", "threshold", "marathon_pace", "strength"],
+        "half_marathon":  ["long_run", "threshold", "tempo", "strength"],
+        "10km":           ["intervals", "threshold", "tempo", "strength"],
+        "5km":            ["intervals", "tempo", "strength"],
+    }
+    EXCLUDE_IN_PEAK = {
+        "marathon":       ["strength"],
+        "half_marathon":  ["strength"],
+        "10km":           ["long_run", "strength"],
+    }
+    base = BASE.get(goal, [])
+    if phase == "peak":
+        base = [s for s in base if s not in EXCLUDE_IN_PEAK.get(goal, [])]
+    return base
+```
+
+只对 `target_stimulus` 中的刺激计算 gap。如 10km peak 期不追踪 `long_run`，不产生 gap。
+
+**Decision Engine 集成：desired_stimulus**
+
+`stimulus_gaps` 在 Performance Gate 层读取，输出为 `desired_stimulus: List[str]`：
+
+```
+Recovery Gate（最高优先级，可 override 一切）
+    ↓ 未命中
+Risk Gate
+    ↓ 未命中
+Performance Gate
+    ├── 原有规则（efficiency_trend, decoupling_status）
+    └── stimulus_gaps 中 severity == "high" 的刺激
+            → desired_stimulus.append(stimulus_type)
+            → 优先级低于 efficiency/decoupling
+    ↓ 未命中
+Normal Training
+```
+
+`desired_stimulus` 由 Plan Generator 消费——"需要补 long_run"由 Planner 决定具体如何安排（90min Easy 或 75+15 MP），不越权。
 
 #### 8. Forecast Engine（V3 预留）
 
@@ -1567,7 +1612,6 @@ updated_plan + user_goal + historical_data
 | 版本 | 模块 | 目标 |
 |------|------|------|
 | **V1** | Policy Generator + Goal Prioritizer + Plan Modifier + Constraint Checker + Repair Engine + SummaryFormatter | 核心链路跑通：Coach 裁决 → 策略 → 标注 → 修改 → 校验 → 修复 → 摘要 → 课表更新 |
-| **V2** | + Debt Manager | 加入长期训练记忆，实现债务生命周期管理 |
 | **V3** | + Forecast Engine | 比赛成绩预测 + 目标可达性分析，从"训练分析器"升级为接近真实耐力运动教练系统 |
 
 ---
