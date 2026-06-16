@@ -1021,17 +1021,25 @@ Action Generator 自动选择方案1。
 GoalPriority session 由 **Goal Prioritizer 预先标注**：解析时直接读取 session 的 `goal_priority` 字段，**不重新推导**。
 
 ```python
-GOAL_PENALTY = 100
+GOAL_PENALTY = {
+    1: 100,   # primary: marathon→long_run, 5km→intervals 等
+    2: 50,    # secondary: 其他 quality session (tempo, intervals, threshold, strides)
+    3: 0,     # normal: easy_run, recovery_run, rest
+}
 ```
 
-修改 `goal_priority=true` 的 session 时，cost 增加 penalty：
+代价计算：
+
+```python
+cost += GOAL_PENALTY[session.priority_level]
+```
 
 例如：
-- 删除一个普通 easy run（goal_priority=false）→ cost = 5
-- 删除 long_run（goal_priority=true）→ cost = 5 + 100 = 105
+- 删除 easy_run（priority_level=3）→ cost = 5 + 0 = 5
+- 删除 tempo（priority_level=2）→ cost = 5 + 50 = 55
+- 删除 long_run（priority_level=1）→ cost = 5 + 100 = 105
 
-基本不会发生。仅在 `critical` severity 且 `full_rest` 场景下允许触碰 GoalPriority session。
-
+> `priority_level=1` 仅在 `critical` severity 且 `full_rest` 场景下允许触碰。
 > **为何不在 Repair Engine 内重复 `GOAL_SESSION_MAP`：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
 
 ---
