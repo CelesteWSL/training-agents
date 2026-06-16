@@ -1039,7 +1039,36 @@ cost += GOAL_PENALTY[session.priority_level]
 - 删除 tempo（priority_level=2）→ cost = 5 + 50 = 55
 - 删除 long_run（priority_level=1）→ cost = 5 + 100 = 105
 
-> `priority_level=1` 仅在 `critical` severity 且 `full_rest` 场景下允许触碰。
+
+##### GoalPriority Override（目标优先级覆盖）
+
+不是所有 severity 都允许触碰 GoalPriority session。由 severity 决定是否放行：
+
+```python
+OVERRIDE_POLICY = {
+    "critical": True,
+    "warning":  False,
+    "info":     False,
+}
+```
+
+当 Action Generator 面对一条违规时，按代价从低到高依次尝试：
+
+```text
+move session
+    ↓ 不行（cost 太高或不可行）
+downgrade session
+    ↓ 不行
+insert rest
+    ↓ 不行
+remove session
+    ↓ 如果 session.goal_priority=true，检查 OVERRIDE_POLICY[violation.severity]
+        ↓ True  → 允许删除
+        ↓ False → 跳过该 session，标记为 unresolvable
+```
+
+这样 Action Generator 天然地优先尝试低代价动作，只有穷尽所有低代价手段后才触碰 GoalPriority，而不是把 `full_rest` 写死为唯一路径。
+
 > **为何不在 Repair Engine 内重复 `GOAL_SESSION_MAP`：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
 
 ---
