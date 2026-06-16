@@ -1316,38 +1316,30 @@ changes + modifiers + repair.changes
     ↓
 模板引擎 → 变化表格（机械部分）
     ↓
-summary_context（结构化聚合）
+Prompt 注入（原始字段直接序列化）
     ↓
 LLM 调用 → 本周要点（语境部分）
     ↓
 拼接 → readable_summary
 ```
 
-**summary_context（LLM 输入）：**
+**LLM Prompt 输入：**
 
-```python
-{
-    "verdict":         "建议减量训练",
-    "state_label":     "CNS 疲劳",
-    "state_recovery":  "3-5 天",
-    "changes": [
-        {"date": "2026-06-18", "original": "Interval 8×400m", "updated": "Easy 8km", "display_reason": "降强度"},
-        {"date": "2026-06-18", "original": "Tempo 8km",     "updated": "Easy 8km", "display_reason": "降强度"},
-        {"date": "2026-06-22", "original": "Long Run 28km",  "updated": "Long Run 16.7km", "display_reason": "缩减至安全比例"},
-    ],
-    "repair_reasons": ["周跑量占比从 49% 缩减至 40%"],
-    "technique_reminders": ["步频练习"],
-}
+将 `changes`（`List[Adjustment]`）、`repair.reasons`、`input.modifiers` 直接序列化为 JSON 注入 prompt，不额外构造中间结构：
+
+```text
+Prompt:
+  你是跑步教练的助手。根据以下训练调整数据，生成一段面向跑者的"本周要点"（3-5 条 bullet），
+  中文口语化但专业。变化表格已由模板生成，你只需输出要点。
+
+  裁决：{action}
+  状态：{physiological_states}
+  变更：{changes_json}
+  修复：{repair.changes_json}
+  提醒：{modifier_labels}
 ```
 
-- `verdict` / `state_label` / `state_recovery` 来自 input，`state_recovery` 查内置映射表
-- `changes` 来自 `changes[]` 列表（`Adjustment` 结构），`display_reason` 由 SummaryFormatter 从 `reason` 映射生成
-- `repair_reasons` 来自 `repair.changes[].reason`
-- `technique_reminders` 来自 `input.modifiers[].label`
-
-**LLM Prompt（示意）：**
-
-> 你是跑步教练的助手。根据训练调整数据，生成一段面向跑者的"本周要点"（3-5 条 bullet），中文口语化但专业。变化表格已由模板生成，你只需输出要点。
+`display_reason`（如"降强度"）由 SummaryFormatter 内部从 `Adjustment.reason` 查表映射，模板生成表格时使用，不注入 LLM prompt。
 
 **降级策略：**
 
