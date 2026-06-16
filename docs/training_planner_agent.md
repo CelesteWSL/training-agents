@@ -1094,19 +1094,27 @@ cost += GOAL_PENALTY[session.priority_level]
 
 ##### GoalPriority Override（目标优先级覆盖）
 
-不是所有 severity 都允许触碰 GoalPriority session。由 severity 决定是否放行：
+不需 `OVERRIDE_POLICY` 等显式规则。Action Evaluator 通过 **自然降级（Natural Fallthrough）** 处理：
 
-```python
-OVERRIDE_POLICY = {
-    "critical": True,
-    "warning":  False,
-    "info":     False,
-}
+```text
+Move session       → simulate → 可行 ✓ (score 最高)
+    ↓ 若 simulate 返回 None
+Downgrade session  → simulate → 可行 ✓
+    ↓ 若 simulate 返回 None
+Insert rest        → simulate → 可行 ✓
+    ↓ 若 simulate 返回 None
+Remove non-goal_priority session → simulate → 可行 ✓
+    ↓ 若所有候选均不可行
+Remove goal_priority session → GOAL_PENALTY=100, 但仍可能是唯一解
 ```
 
-Action Evaluator 对所有候选动作做 simulate → score 后择优。GoalPriority Override 的作用是：在候选列表中排除 RemoveSessionAction（如果 severity 不允许）。
-这样 Action Evaluator 自然地对所有候选动作做评价，goal_priority=true 的 session，RemoveSessionAction 只在 `critical` severity 下才进入候选列表——不需要把 `full_rest` 写死为唯一路径。
+核心机制：
 
+- `GOAL_PENALTY[priority_level]` 让修改 GoalPriority session 的 score 大幅降低
+- Action Evaluator 自然选最高分 → 低 cost 动作天然优先
+- 只有当所有低 cost 方案的 `simulate()` 均返回 `None`（无法执行）时，高 penalty 方案才成为默认赢家
+
+> 不把 `full_rest` 写死为触发条件，也不把 `critical` severity 作为开关。**是否触碰 GoalPriority，由 simulate → score 的结果决定，而非预先声明的规则。**
 > **为何不在 Repair Engine 内重复 GoalPriority 推导：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
 
 ---
