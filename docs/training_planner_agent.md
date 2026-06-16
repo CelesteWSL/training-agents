@@ -1323,6 +1323,39 @@ LLM 调用 → 本周要点（语境部分）
 拼接 → readable_summary
 ```
 
+**变化表格模板（机械部分）：**
+
+遍历 `changes`（`List[Adjustment]`），逐行生成：
+
+```python
+def build_change_table(changes: List[Adjustment]) -> str:
+    if not changes:
+        return "本周课表无调整。"
+
+    rows = []
+    for c in changes:
+        display = DISPLAY_REASON_MAP.get(c.reason, c.reason)  # 查表映射
+        rows.append(f"| {c.date} | {c.original} | {c.updated} | {display} |")
+
+    header = "| 日期 | 原计划 | 调整后 | 原因 |"
+    sep    = "|------|--------|--------|------|"
+    return '\n'.join([header, sep] + rows)
+```
+
+```python
+DISPLAY_REASON_MAP = {
+    "Policy: downgrade_high_intensity": "降强度",
+    "Policy: reduce_volume_ratio":     "缩减跑量",
+    "Policy: protect_long_run":        "保留长距离",
+    "Repair: long_run_ratio":          "缩减至安全比例",
+    "Repair: weekly_volume_growth":    "缩减跑量",
+    "Repair: consecutive_hard_days":   "降强度",
+    "Repair: intensity_ratio":         "降强度",
+}
+```
+
+最终 `readable_summary` = 裁决行 + 表格（模板） + 要点（LLM），拼接为完整 Markdown。
+
 **LLM Prompt：**
 
 将以下结构化数据注入 LLM，不额外构造中间 schema：
