@@ -46,9 +46,9 @@ class WeeklyBlock(TypedDict):
 #### DailySession
 ```python
 class DailySession(TypedDict):
-    session_id:           str       # "w03_tue_tempo"
-    date:                 str       # "2026-06-15"
-    day_of_week:          str       # "周一"
+    session_id:           str       # 不可变标识符，sess_123。activity log / debt manager / report 均引用此 ID
+    scheduled_date:       str       # "2026-06-15"，MoveSession 修改此字段
+    scheduled_day:        str       # "周一"，MoveSession 修改此字段
     session_type:         str       # rest / easy_run / long_run / tempo / intervals / strides / recovery_run / marathon_pace
     duration_min:         int
     target_distance_km:   Optional[float]
@@ -962,7 +962,7 @@ class BaseRepairAction:
 
 | Action | Cost | 含义 |
 |--------|------|------|
-| `MoveSessionAction` | 1 | 将 session 移到邻近空闲 slot，不顺延后续 session |
+| `MoveSessionAction` | 1 | 移到邻近空闲 slot（仅改 `scheduled_date`/`scheduled_day`，`session_id` 不变） |
 | `ReduceDistanceAction` | 1 | 缩减距离 |
 | `DowngradeSessionAction` | 2 | 降级强度（hard→moderate, moderate→easy, easy→rest） |
 | `InsertRestAction` | 3 | 在两个 session 之间插入 rest day |
@@ -1125,7 +1125,7 @@ Remove goal_priority session → GOAL_PENALTY=100, 但仍可能是唯一解
 
 | 动作 | 修改内容 |
 |------|----------|
-| MoveSessionAction | 改 `date` / `day_of_week` / `session_id`，仅改目标 session，不顺延 |
+| MoveSessionAction | 改 `scheduled_date` / `scheduled_day`（`session_id` 不可变） |
 | DowngradeSessionAction | 改 `session_type` / `intensity` / `hr_zone` / `description` |
 | ReduceDistanceAction | 改 `target_distance_km` / `duration_min` |
 | InsertRestAction | 插入 Rest session（`session_type="rest", intensity="rest"`），后续顺延 |
