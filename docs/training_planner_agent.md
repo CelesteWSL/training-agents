@@ -417,7 +417,7 @@ Coach Agent 回答"发生了什么"，Training Planner Agent 回答"未来怎么
 | `changes` | `List[Adjustment]` | 逐条修改记录 |
 | `constraint_check` | `ConstraintCheckerResult` | 约束校验结果 |
 | `repair_log` | `dict` or `null` | 修复引擎日志 |
-| `readable_summary` | `str` | 面向用户的可读摘要（Markdown），可直接推送/展示 |
+| `readable_summary` | `str` | 面向用户的可读摘要（Markdown）。由 SummaryFormatter 调 LLM 从 `summary_context` 生成 |
 
 ### 核心设计原则
 
@@ -439,10 +439,17 @@ class TrainingPlannerAgent:
         repair    = RepairEngine.repair(draft, check.violations, input.analysis_context)
         changes   = diff(input.current_plan, repair.plan)
         debts     = DebtManager.register(changes)
-        return PlannerOutput(repair.plan, changes, repair, debts)
+        summary   = SummaryFormatter.format(
+            action     = input.action,
+            modifiers  = input.modifiers,
+            states     = input.analysis_context.get("physiological_states", []),
+            changes    = changes,
+            repair     = repair,
+        )
+        return PlannerOutput(repair.plan, changes, repair, debts, summary)
 ```
 
-流水线：**Policy Generator → Goal Prioritizer → Plan Modifier → Constraint Checker → Repair Engine → Final Plan**
+流水线：**Policy Generator → Goal Prioritizer → Plan Modifier → Constraint Checker → Repair Engine → SummaryFormatter → Final Plan**
 
 职责分工：
 - Policy Generator：生成训练调整策略
@@ -1295,9 +1302,60 @@ class RepairChange(TypedDict):
 
 ---
 
-#### 6. Debt Manager（债务管理器 V2）
-#### 6. Debt Manager（债务管理器 V2）
-#### 6. Debt Manager（债务管理器 V2）
+
+---
+
+#### 6. SummaryFormatter（摘要生成器）
+
+将 Planner 的结构化输出转换为面向跑者的自然语言摘要。
+
+**生成流程：**
+
+```text
+changes + modifiers + repair.changes
+    ↓
+模板引擎 → 变化表格（机械部分）
+    ↓
+summary_context（结构化聚合）
+    ↓
+LLM 调用 → 本周要点（语境部分）
+    ↓
+拼接 → readable_summary
+```
+
+**summary_context（LLM 输入）：**
+
+```python
+{
+    "verdict":         "建议减量训练",
+    "state_label":     "CNS 疲劳",
+    "state_recovery":  "3-5 天",
+    "changes": [
+        {"day": "周二", "from": "Interval 8×400m", "to": "Easy 8km", "display_reason": "降强度"},
+        {"day": "周四", "from": "Tempo 8km",     "to": "Easy 8km", "display_reason": "降强度"},
+        {"day": "周日", "from": "Long Run 28km",  "to": "Long Run 16.7km", "display_reason": "缩减至安全比例"},
+    ],
+    "repair_reasons": ["周跑量占比从 49% 缩减至 40%"],
+    "technique_reminders": ["步频练习"],
+}
+```
+
+- `verdict` / `state_label` / `state_recovery` 来自 input，`state_recovery` 查内置映射表
+- `changes` 来自 `changes[]` 列表，`display_reason` 由 Plan Modifier / Repair Engine 写入
+- `repair_reasons` 来自 `repair.changes[].reason`
+- `technique_reminders` 来自 `input.modifiers[].label`
+
+**LLM Prompt（示意）：**
+
+> 你是跑步教练的助手。根据训练调整数据，生成一段面向跑者的"本周要点"（3-5 条 bullet），中文口语化但专业。变化表格已由模板生成，你只需输出要点。
+
+**降级策略：**
+
+LLM 调用失败时，模板引擎兜底生成简化版要点。`readable_summary` 永远不为空。
+
+---
+
+#### 7. Debt Manager（债务管理器 V2）
 
 记录未完成的关键训练，恢复后找机会补回。使系统具有**长期记忆**，而非每次分析完就结束。
 
@@ -1350,7 +1408,7 @@ Plan Modifier 安排 (status = scheduled)
 
 ---
 
-#### 7. Forecast Engine（V3 预留）
+#### 8. Forecast Engine（V3 预留）
 
 基于更新后的训练计划，预测比赛成绩，分析目标可达性。
 
@@ -1416,7 +1474,7 @@ updated_plan + user_goal + historical_data
 
 ---
 
-#### 8. Performance Limitation Analysis（V2）
+#### 9. Performance Limitation Analysis（V2）
 
 负责识别和解决运动员的中长期能力短板，回答"为什么成绩上不去"：
 
@@ -1438,7 +1496,7 @@ updated_plan + user_goal + historical_data
 
 | 版本 | 模块 | 目标 |
 |------|------|------|
-| **V1** | Policy Generator + Plan Modifier + Constraint Checker + Repair Engine | 核心链路跑通：Coach 裁决 → 策略 → 修改 → 约束校验 → 修复 → 课表更新 |
+| **V1** | Policy Generator + Goal Prioritizer + Plan Modifier + Constraint Checker + Repair Engine + SummaryFormatter | 核心链路跑通：Coach 裁决 → 策略 → 标注 → 修改 → 校验 → 修复 → 摘要 → 课表更新 |
 | **V2** | + Debt Manager | 加入长期训练记忆，实现债务生命周期管理 |
 | **V3** | + Forecast Engine | 比赛成绩预测 + 目标可达性分析，从"训练分析器"升级为接近真实耐力运动教练系统 |
 
