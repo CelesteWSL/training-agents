@@ -1323,24 +1323,33 @@ LLM 调用 → 本周要点（语境部分）
 拼接 → readable_summary
 ```
 
-**LLM Prompt 输入：**
+**LLM Prompt：**
 
-将 `changes`（`List[Adjustment]`）、`repair.reasons`、`input.modifiers` 直接序列化为 JSON 注入 prompt，不额外构造中间结构：
+将以下结构化数据注入 LLM，不额外构造中间 schema：
 
 ```text
-Prompt:
-  你是跑步教练的助手。根据以下训练调整数据，生成一段面向跑者的"本周要点"（3-5 条 bullet），
-  中文口语化但专业。变化表格已由模板生成，你只需输出要点。
+你是跑步教练的助手。根据训练调整数据，生成一段面向跑者的"本周要点"（3-5 条 bullet），中文口语化但专业。
+变化表格已由模板生成，你只需输出要点。按以下规则逐条生成：
 
-  裁决：{action}
-  状态：{physiological_states}
-  变更：{changes_json}
-  修复：{repair.changes_json}
-  提醒：{modifier_labels}
+1. 如果 changes 非空，总结哪些 session 被调整了，以及调整方向（降强度 / 减量 / 改期）
+2. 如果 physiological_states 非空，解释当前身体状态及对应的恢复建议。参考映射：
+   cns_fatigue → "CNS 疲劳，需要降低强度，预计 3-5 天恢复"
+   muscular_fatigue → "肌肉疲劳，建议减少跑量，预计 2-3 天恢复"
+   cardiovascular_strain → "心血管负荷偏高，控制心率区间，预计 3-4 天恢复"
+   functional_overreaching → "功能性过度训练，需主动减量，预计 5-7 天恢复"
+3. 如果 repair.changes 非空，说明修复引擎解决了什么约束问题
+4. 如果 modifiers 非空，提醒训练中需关注的技术要点
+5. 以鼓励性语句收尾
+
+数据：
+  裁决动作：{action}
+  生理状态：{physiological_states}
+  计划变更：{changes_json}
+  修复记录：{repair_changes_json}
+  技术提醒：{modifier_labels}
 ```
 
-`display_reason`（如"降强度"）由 SummaryFormatter 内部从 `Adjustment.reason` 查表映射，模板生成表格时使用，不注入 LLM prompt。
-
+> `display_reason`（如"降强度"）由 SummaryFormatter 内部从 `Adjustment.reason` 查表映射，模板生成表格用，不注入 prompt。
 **降级策略：**
 
 LLM 调用失败时，模板引擎兜底生成简化版要点。`readable_summary` 永远不为空。
