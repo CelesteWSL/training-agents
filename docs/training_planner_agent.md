@@ -860,6 +860,7 @@ INTENSITY_POLICY = {
 Repair Engine
 ├── Violation Grouper     → 聚合违规，识别共享根因
 ├── Action Generator     → 生成候选修复动作
+├── Action Evaluator     → Dry Run 模拟 + 打分，选最优
 ├── Plan Applier         → 执行修复
 └── Validation Loop      → 重新校验并迭代
 ```
@@ -953,10 +954,13 @@ CONSTRAINT_PRIORITY = {
 
 ```python
 class BaseRepairAction:
-    def apply(self, plan, violation, context) -> int:
-        """执行修复，返回 cost。失败返回 -1。"""
+    def simulate(self, plan, violation, context) -> dict | None:
+        """模拟修复，返回 {"plan": candidate_plan, "cost": int}。失败返回 None。不修改原 plan。"""
         ...
-```
+
+    def apply(self, plan) -> dict:
+        """将 simulate 产出的 candidate_plan 写入原 plan。永不失败（simulate 已验证通过）。"""
+        ...
 
 **5 种具体修复动作：**
 
@@ -995,6 +999,44 @@ Action Generator 按 violation 的 `constraint` 字段查找：
 candidates = REPAIR_POLICY[violation.constraint]
 ```
 
+##### Action Evaluator（动作评估器）与 Dry Run
+
+不直接 apply。先对所有候选动作做 Dry Run（`simulate`），逐个打分，再 apply 最优：
+
+```text
+Violation
+    ↓
+MoveSession     → simulate → score=96
+    ↓
+DowngradeSession → simulate → score=92
+    ↓
+InsertRest      → simulate → score=88
+    ↓
+RemoveSession   → simulate → score=85
+    ↓
+Action Evaluator 选最高分
+    ↓
+Apply MoveSession（唯一一次真实写入）
+```
+
+```python
+score = (
+    constraint_score      # Constraint Checker 评估 candidate_plan
+    - repair_cost         # 动作自身 cost
+    - goal_penalty        # GOAL_PENALTY[priority_level]
+)
+```
+
+| 候选动作 | constraint_score | cost | goal_penalty | **总分** |
+|----------|:---:|:---:|:---:|:---:|
+| MoveSession | 96 | -1 | 0 | **95** |
+| DowngradeSession | 95 | -2 | 0 | 93 |
+| InsertRest | 93 | -3 | 0 | 90 |
+
+选出总分最高的 MoveSession → `apply()`。
+
+> Dry Run 是专业训练软件和业余脚本的分水岭——不是在纸上猜测哪个动作好，而是真的跑一遍 constraint check 看结果。
+
 例如新增 `zone3_trap` 规则，归属 `intensity` 类别，自动获得 `DowngradeSessionAction`，无需修改任何 registry：
 
 ```python
@@ -1008,7 +1050,7 @@ candidates = REPAIR_POLICY[violation.constraint]
 # Repair Engine 侧：零改动，自动通过 REPAIR_POLICY["intensity"] 拿到 DowngradeSessionAction
 ```
 
-列表按 cost 升序排列。Action Generator 按序尝试，取第一个成功的（cost 最低的）。
+所有候选动作均做 simulate → score → 选最高分 → apply，而非按序取第一个成功。这确保改动最小且效果最好。
 
 **设计示例——连续 Hard 违规的多种修法：**
 
@@ -1020,11 +1062,11 @@ Mon easy  |  Tue intervals  |  Wed tempo  |  Thu easy  |  Fri long_run
 
 违规：Tue intervals + Wed tempo 连续 Hard。
 
-| 方案 | 动作 | 结果 | Cost |
-|------|------|------|------|
-| **方案1（推荐）** | MoveSession | Wed tempo → Thu, Thu easy → Fri | 1 |
-| 方案2 | DowngradeSession | Wed tempo → easy | 2 |
-| 方案3 | InsertRest | Wed 插入 rest，后续顺延 | 3 |
+| 方案 | 动作 | 结果 | Cost | Score |
+|------|------|------|------|:---:|
+| **方案1（推荐）** | MoveSession | Wed tempo → Thu, Thu easy → Fri | 1 | **95** |
+| 方案2 | DowngradeSession | Wed tempo → easy | 2 | 93 |
+| 方案3 | InsertRest | Wed 插入 rest，后续顺延 | 3 | 90 |
 
 Action Generator 自动选择方案1。
 
@@ -1066,22 +1108,8 @@ OVERRIDE_POLICY = {
 }
 ```
 
-当 Action Generator 面对一条违规时，按代价从低到高依次尝试：
-
-```text
-move session
-    ↓ 不行（cost 太高或不可行）
-downgrade session
-    ↓ 不行
-insert rest
-    ↓ 不行
-remove session
-    ↓ 如果 session.goal_priority=true，检查 OVERRIDE_POLICY[violation.severity]
-        ↓ True  → 允许删除
-        ↓ False → 跳过该 session，标记为 unresolvable
-```
-
-这样 Action Generator 天然地优先尝试低代价动作，只有穷尽所有低代价手段后才触碰 GoalPriority，而不是把 `full_rest` 写死为唯一路径。
+Action Evaluator 对所有候选动作做 simulate → score 后择优。GoalPriority Override 的作用是：在候选列表中排除 RemoveSessionAction（如果 severity 不允许）。
+这样 Action Evaluator 自然地对所有候选动作做评价，goal_priority=true 的 session，RemoveSessionAction 只在 `critical` severity 下才进入候选列表——不需要把 `full_rest` 写死为唯一路径。
 
 > **为何不在 Repair Engine 内重复 `GOAL_SESSION_MAP`：** GoalPriority 的识别逻辑可能随时间变化（如 marathon 将来引入 `marathon_pace` 作为并列 GoalPriority），若 Repair Engine 独立维护一份映射表，极易在升级时遗漏同步，产生 bug。正确的做法是 Goal Prioritizer 一次性写入 `goal_priority`，Repair Engine 仅读取。
 
@@ -1089,7 +1117,7 @@ remove session
 
 ##### Plan Applier（计划应用器）
 
-对 Action Generator 选出的最优动作，修改对应的 `DailySession`：
+对 Action Evaluator 选出的最优动作（附带 simulate 产出的 `candidate_plan`），修改对应的 `DailySession`：
 
 | 动作 | 修改内容 |
 |------|----------|
