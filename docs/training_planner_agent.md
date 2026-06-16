@@ -1,4 +1,4 @@
-﻿## Training Table Generator
+## Training Table Generator
 
 Training Table Generator 是训练计划系统的初始生成层，负责在用户初始化时生成完整的周期化训练表。它输出 TrainingTable，供 Training Planner Agent 后续动态调整。
 
@@ -56,6 +56,8 @@ class DailySession(TypedDict):
     hr_zone:              str       # "rest" / "zone1" / "zone2" / "zone3" / "zone4"
     description:          str
     technique_focus:      List[str]
+    goal_priority:        bool      # Goal Prioritizer writes this; Repair Engine reads, does NOT re-derive
+    priority_level:       int       # 1-3, written by Goal Prioritizer
 ```
 
 ---
