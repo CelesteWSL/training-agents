@@ -2018,33 +2018,20 @@ Each ingested data entry carries metadata tags `book`, `chapter`, `domain` for r
 | **Unstructured** | PDF parsing, auto-chunking by heading hierarchy, preserving document structure |
 | **Pandoc** | EPUB parsing to plain text |
 | **LlamaIndex** | Text chunking (SentenceSplitter) |
-| **Milvus** | Hybrid vector DB (dense semantic + sparse BM25 keyword vectors) |
+| **Milvus Lite** | Local vector database, dense vector retrieval (1024-dim), no Docker required |
 | **text-embedding-v3** | Embedding model, DashScope API, 1024-dim |
 
 ---
 
 ## Core Strategies
 
-### 1. Hierarchical Chunking (Parent-Child)
+### 1. Text Chunking
 
-```
-Parent chunk (1024 tokens) — ensures complete context
-  ├── Child 1 (256 tokens) — for vector retrieval
-  ├── Child 2 (256 tokens) — for vector retrieval
-  ├── Child 3 (256 tokens) — for vector retrieval
-  └── Child 4 (256 tokens) — for vector retrieval
-```
+Uses LlamaIndex `SentenceSplitter`, chunk_size=512 tokens, overlap=50 tokens.
 
-Retrieval hits child → returns parent → Agent gets complete context.
+### 2. Dense Vector Retrieval
 
-### 2. Hybrid Retrieval (Semantic + Keyword)
-
-| Retrieval Method | Problem Solved |
-|----------|----------|
-| Dense vector (semantic) | "How to recover when HR stays high after running" → matches recovery paragraphs |
-| Sparse vector (BM25 keyword) | "ACWR" → precisely hits paragraphs containing this term |
-
-Milvus 2.4+ natively supports hybrid retrieval — single query traverses both pathways.
+Uses `text-embedding-v3` to encode queries into 1024‑dim vectors, searched via COSINE similarity in Milvus Lite.
 
 ### 3. Metadata Filtering
 
@@ -2056,12 +2043,6 @@ Each Agent queries only its own domain, cutting 75% irrelevant data:
 | Training Load Agent | `training_load` |
 | Performance Agent | `performance` |
 | Risk Agent | `recovery`, `risk` |
-
-### 4. Rerank Secondary Sorting
-
-Coarse retrieval 20 items → BGE-Reranker re-rank → return Top-5. 5 items sufficient for Agent judgment, won't blow up context window.
-
----
 
 ## RAG Trigger Scenarios per Agent
 
@@ -2089,10 +2070,10 @@ Agent detects abnormal indicator
 Construct natural language query + domain filter
         │
         ▼
-Milvus hybrid retrieval (semantic + BM25 + metadata filter) → coarse Top-20
+text-embedding-v3 encode → Milvus Lite dense retrieval → Top-3
         │
         ▼
-BGE-Reranker re-rank → Top-5
+Inject into Agent prompt as context + citation source
         │
         ▼
 Inject into Agent prompt as context + citation source
