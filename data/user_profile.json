@@ -1,0 +1,16 @@
+{
+  "age": 30,
+  "gender": "male",
+  "height_cm": 175.0,
+  "weight_kg": 70.0,
+  "goal": "half_marathon",
+  "training_level": "进阶",
+  "personal_bests": {
+    "10km": "45:00",
+    "半马": "1:45:00"
+  },
+  "injury_history": [
+    "膝盖"
+  ],
+  "max_hr": 190
+}

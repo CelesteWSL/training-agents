@@ -1,0 +1,23 @@
+# Milvus
+data/milvus.db
+data/milvus.db.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# IDE
+.idea/
+
+# Pytest
+.pytest_cache/
+
+# Environment
+.env
+
+# Reports (generated)
+reports/
+# Knowledge base (large binary files)
+data/knowledge/
