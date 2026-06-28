@@ -2026,27 +2026,12 @@ RAG 知识库为 Recovery Agent、Training Load Agent、Performance Agent、Risk
 
 ## 核心策略
 
-### 1. 层级切片（Parent-Child Chunking）
+### 1. 文本切片
 
-```
-父块 (Parent, 1024 tokens)  — 保证上下文完整
-  ├── 子块 1 (256 tokens)   — 用于向量检索
-  ├── 子块 2 (256 tokens)   — 用于向量检索
-  ├── 子块 3 (256 tokens)   — 用于向量检索
-  └── 子块 4 (256 tokens)   — 用于向量检索
-```
+使用 LlamaIndex `SentenceSplitter`，chunk_size=512 tokens，overlap=50 tokens。
+### 2. 稠密向量检索
 
-检索命中子块 → 返回对应父块 → Agent 拿到完整上下文。
-
-### 2. 混合检索（语义 + 关键词）
-
-| 检索方式 | 解决问题 |
-|----------|----------|
-| 稠密向量（语义） | 「跑步后心率恢复慢怎么办」→ 匹配到恢复相关段落 |
-| 稀疏向量（BM25 关键词） | 「ACWR」→ 精确命中含此术语的段落 |
-
-Milvus 2.4+ 原生支持混合检索，一次查询同时走两条通路。
-
+使用 `text-embedding-v3` 对查询文本生成 1024 维向量，在 Milvus Lite 中通过 COSINE 相似度检索。
 ### 3. 元数据过滤
 
 每个 Agent 查询时只搜自己域，砍掉 75% 无关数据：
@@ -2057,12 +2042,6 @@ Milvus 2.4+ 原生支持混合检索，一次查询同时走两条通路。
 | Training Load Agent | `training_load` |
 | Performance Agent | `performance` |
 | Risk Agent | `recovery`、`risk` |
-
-### 4. Rerank 二次排序
-
-粗筛 20 条 → BGE-Reranker 精排 → 返回 Top-5。5 条足够 Agent 做判断，不撑爆上下文窗口。
-
----
 
 ## 各 Agent 触发 RAG 的场景
 
@@ -2090,13 +2069,12 @@ Agent 检测到指标异常
 构造自然语言 query + domain filter
         │
         ▼
-Milvus 混合检索（语义 + BM25 + 元数据过滤）→ 粗筛 Top-20
-        │
-        ▼
-BGE-Reranker 精排 → Top-5
+text-embedding-v3 向量化 → Milvus Lite 稠密检索 → Top-3
         │
         ▼
 注入 Agent prompt 作为上下文 + 引用来源
+        │
+        ▼
         │
         ▼
 Agent 将 RAG 检索结果注入 prompt，LLM 生成 summary（RAG 内容融入总结，不单独暴露）
