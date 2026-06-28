@@ -19,6 +19,13 @@ cd training-agents
 pip install -e .
 ```
 
+### Models Used
+
+| Layer | Model | Notes |
+|-------|-------|-------|
+| **LLM** (text generation) | DeepSeek V3 / GPT-4o / Claude / Gemini / Qwen / etc. | Swappable via `.env`, any OpenAI-compatible provider works |
+| **Embedding** (RAG) | `text-embedding-v3` (DashScope) | Fixed 1024‑dim vectors. If you switch to a different embedding model, you must rebuild the Milvus index. |
+
 ### Supported Models
 
 The system supports multiple LLM providers: **OpenAI** (GPT-4o, GPT-4o-mini), **DeepSeek** (V3, R1), **Anthropic** (Claude), **Google** (Gemini), **Azure OpenAI**, **Qwen** (通义千问), **GLM** (智谱), **MiniMax**, **Ollama** (local), and **OpenRouter**.
