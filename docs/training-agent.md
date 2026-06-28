@@ -2016,11 +2016,12 @@ RAG 知识库为 Recovery Agent、Training Load Agent、Performance Agent、Risk
 
 | 组件 | 用途 |
 |------|------|
-| **Unstructured** | PDF 解析，按标题层级自动切片，保留文档结构 |
-| **LlamaIndex** | 父-子切片编排、索引管理、查询引擎 |
-| **Milvus** | 混合向量库（稠密语义向量 + 稀疏 BM25 关键词向量） |
-| **BGE-M3** | Embedding 模型，中英文通吃，1024 维，本地部署 |
-| **BGE-Reranker-v2-m3** | 检索后二次排序，Top-20 → Top-5 |
+| **Unstructured** | PDF 解析 |
+| **Pandoc** | EPUB 解析，转为纯文本 |
+| **LlamaIndex** | 文本切片（SentenceSplitter） |
+| **Milvus Lite** | 本地向量库，稠密向量检索（1024 维），无需 Docker |
+| **text-embedding-v3** | Embedding 模型，DashScope API，1024 维 |
+| **BGE-Reranker-v2-m3** | 检索后二次排序，Top-20 → Top-3 |
 
 ---
 

@@ -2016,10 +2016,11 @@ Each ingested data entry carries metadata tags `book`, `chapter`, `domain` for r
 | Component | Purpose |
 |------|------|
 | **Unstructured** | PDF parsing, auto-chunking by heading hierarchy, preserving document structure |
-| **LlamaIndex** | Parent-child chunk orchestration, index management, query engine |
+| **Pandoc** | EPUB parsing to plain text |
+| **LlamaIndex** | Text chunking (SentenceSplitter) |
 | **Milvus** | Hybrid vector DB (dense semantic + sparse BM25 keyword vectors) |
-| **BGE-M3** | Embedding model, bilingual EN/ZH, 1024-dim, local deployment |
-| **BGE-Reranker-v2-m3** | Post-retrieval re-ranking, Top-20 → Top-5 |
+| **text-embedding-v3** | Embedding model, DashScope API, 1024-dim |
+| **BGE-Reranker-v2-m3** | Post-retrieval re-ranking, Top-20 → Top-3 |
 
 ---
 
