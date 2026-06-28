@@ -1,0 +1,61 @@
+# Training Agents — Multi-Agent AI Running Coach System
+
+> A multi-agent AI running training analysis system: upload a Garmin / Coros workout file (TCX), and the system automatically produces a coach-level analysis report.
+
+💡 Sample training data is included — you can run it right away. To use your own data, simply delete the files under `data/training/` and replace them with your own TCX files, and delete the `data/daily_checkin/` data before re-running the CLI.
+
+## Quick Start
+
+### Prerequisites
+
+- Python >= 3.10
+- pip (virtual environment recommended)
+
+### Installation
+
+```bash
+git clone https://github.com/CelesteWSL/training-agents.git
+cd training-agents
+pip install -e .
+```
+
+### Configure LLM
+
+Create a `.env` file:
+
+```env
+DEEPSEEK_API_KEY=sk-xxx
+LLM_PROVIDER=deepseek
+QUICK_THINK_LLM=deepseek-v4-flash
+OUTPUT_LANGUAGE=Chinese
+```
+
+### Three Steps
+
+```bash
+# Step 1: Create your profile
+training-agents init
+
+# Step 2: Daily check-in
+training-agents checkin --date 2024-03-17 --morning-hr 55 --rpe 4 --soreness 2
+
+# Step 3: After a run, get your report
+training-agents analyze --date 2024-03-17
+```
+
+## Architecture
+
+```
+TCX File → [Data Agent] → Recovery / Load / Performance / Risk Agents (parallel)
+                                    ↓
+                          State Recognition Engine
+                                    ↓
+                          Decision Engine
+                                    ↓
+                          Report Generator → Markdown Report
+```
+
+## Documentation
+
+- [中文文档](docs/training-agent.md)
+- [English Documentation](docs/training-agent.en.md)
