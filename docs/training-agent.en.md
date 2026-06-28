@@ -1999,8 +1999,6 @@ The RAG knowledge base provides professional sports science knowledge support fo
 |------|--------|-----------|------|
 | "Daniels' Running Formula" Jack Daniels | `training_load` | Training Load Agent | EN/ZH |
 | "Injury-Free Running" Dai Jiansong | `recovery`, `risk` | Recovery Agent, Risk Agent | ZH |
-| "Daniels' Running Formula" Jack Daniels | `training_load` | Training Load Agent | EN/ZH |
-| "Injury-Free Running" Dai Jiansong | `recovery`, `risk` | Recovery Agent, Risk Agent | ZH |
 | "80/20 Running" Matt Fitzgerald | `performance` | Performance Agent | EN |
 | "Science of Running" | `recovery` | Recovery Agent | ZH |
 | "Ultimate Marathon Training Guide" | `performance`, `load` | Performance Agent, Load Agent | ZH |
