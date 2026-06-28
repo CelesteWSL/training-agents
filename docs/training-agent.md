@@ -2053,7 +2053,7 @@ Milvus 2.4+ 原生支持混合检索，一次查询同时走两条通路。
 
 | Agent | 检索 domain |
 |-------|------------|
-| Recovery Agent | ????????? |
+| Recovery Agent | `recovery` |
 | Training Load Agent | `training_load` |
 | Performance Agent | `performance` |
 | Risk Agent | `recovery`、`risk` |
