@@ -19,6 +19,18 @@ cd training-agents
 pip install -e .
 ```
 
+### RAG Knowledge Sources
+
+The knowledge base is built from 5 books:
+
+| Book | Domain | Language |
+|------|--------|----------|
+| 《丹尼尔斯经典跑步训练法》 Jack Daniels | `training_load` | EN/ZH |
+| 《无伤跑法》戴剑松 | `recovery`, `risk` | ZH |
+| 《80/20 Running》 Matt Fitzgerald | `performance` | EN |
+| 《科学跑步》 | `recovery` | ZH |
+| 《马拉松终极训练指南》 | `performance`, `load` | ZH |
+
 ### Models Used
 
 | Layer | Model | Notes |
