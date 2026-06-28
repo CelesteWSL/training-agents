@@ -2020,7 +2020,6 @@ Each ingested data entry carries metadata tags `book`, `chapter`, `domain` for r
 | **LlamaIndex** | Text chunking (SentenceSplitter) |
 | **Milvus** | Hybrid vector DB (dense semantic + sparse BM25 keyword vectors) |
 | **text-embedding-v3** | Embedding model, DashScope API, 1024-dim |
-| **BGE-Reranker-v2-m3** | Post-retrieval re-ranking, Top-20 → Top-3 |
 
 ---
 

@@ -2021,7 +2021,6 @@ RAG 知识库为 Recovery Agent、Training Load Agent、Performance Agent、Risk
 | **LlamaIndex** | 文本切片（SentenceSplitter） |
 | **Milvus Lite** | 本地向量库，稠密向量检索（1024 维），无需 Docker |
 | **text-embedding-v3** | Embedding 模型，DashScope API，1024 维 |
-| **BGE-Reranker-v2-m3** | 检索后二次排序，Top-20 → Top-3 |
 
 ---
 
