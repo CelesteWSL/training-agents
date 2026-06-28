@@ -2002,7 +2002,11 @@ RAG 知识库为 Recovery Agent、Training Load Agent、Performance Agent、Risk
 |------|--------|-----------|------|
 | 《丹尼尔斯经典跑步训练法》Jack Daniels | `training_load` | Training Load Agent | 英文/中文 |
 | 《无伤跑法》戴剑松 | `recovery`、`risk` | Recovery Agent、Risk Agent | 中文 |
+| 《丹尼尔斯经典跑步训练法》Jack Daniels | `training_load` | Training Load Agent | 英文/中文 |
+| 《无伤跑法》戴剑松 | `recovery`、`risk` | Recovery Agent、Risk Agent | 中文 |
 | 《80/20 Running》Matt Fitzgerald | `performance` | Performance Agent | 英文 |
+| 《科学跑步》 | `recovery` | Recovery Agent | 中文 |
+| 《马拉松终极训练指南》 | `performance`、`load` | Performance Agent、Load Agent | 中文 |
 
 每条入库数据附带元数据标签 `book`、`chapter`、`domain`，供检索时过滤。
 
