@@ -1840,7 +1840,6 @@ SRA 可追加额外 Load 规则（muscular_fatigue 时），可由 `_load_add_ru
 #### Overall Flow
 
 ```
-```
 recovery_report ──┐
 load_report ──────┤
 performance_report ┤
@@ -1906,7 +1905,6 @@ ruling ───────────┘
 - 语言专业但易懂，根据用户画像调整语气
 ```
 
-**上下文拼接：**
 **上下文拼接：**
 
 ```python
