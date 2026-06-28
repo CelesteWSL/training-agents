@@ -19,6 +19,10 @@ cd training-agents
 pip install -e .
 ```
 
+### Supported Models
+
+The system supports multiple LLM providers: **OpenAI** (GPT-4o, GPT-4o-mini), **DeepSeek** (V3, R1), **Anthropic** (Claude), **Google** (Gemini), **Azure OpenAI**, **Qwen** (通义千问), **GLM** (智谱), **MiniMax**, **Ollama** (local), and **OpenRouter**.
+
 ### Configure LLM
 
 Create a `.env` file:
